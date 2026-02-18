@@ -1,0 +1,140 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// VENUE (Заведение)
+// ============================================
+
+model Venue {
+  id            String   @id @default(cuid())
+  name          String
+  slug          String   @unique
+  description   String?  @db.Text
+  aiDescription String?  @db.Text @map("ai_description")
+  address       String
+  latitude      Float
+  longitude     Float
+  phone         String?
+  whatsapp      String?
+  photoUrls     String[] @map("photo_urls")
+  workingHours  Json?    @map("working_hours")
+  liveScore     Float    @default(0) @map("live_score")
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  categoryId String   @map("category_id")
+  category   Category @relation(fields: [categoryId], references: [id])
+
+  tags          VenueTag[]
+  scoreHistory  ScoreHistory[]
+  reviews       Review[]
+  socialSignals SocialSignal[]
+
+  @@index([latitude, longitude])
+  @@index([liveScore])
+  @@index([categoryId])
+  @@map("venues")
+}
+
+// ============================================
+// CATEGORY (Категория заведения)
+// ============================================
+
+model Category {
+  id    String @id @default(cuid())
+  name  String @unique
+  slug  String @unique
+  icon  String
+  color String
+
+  venues Venue[]
+
+  @@map("categories")
+}
+
+// ============================================
+// TAG (Теги: Wi-Fi, парковка, терраса)
+// ============================================
+
+model Tag {
+  id   String @id @default(cuid())
+  name String @unique
+  slug String @unique
+
+  venues VenueTag[]
+
+  @@map("tags")
+}
+
+model VenueTag {
+  venueId String @map("venue_id")
+  tagId   String @map("tag_id")
+
+  venue Venue @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  tag   Tag   @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([venueId, tagId])
+  @@map("venue_tags")
+}
+
+// ============================================
+// SCORE HISTORY (История Live Score)
+// ============================================
+
+model ScoreHistory {
+  id           String   @id @default(cuid())
+  score        Float
+  calculatedAt DateTime @default(now()) @map("calculated_at")
+
+  venueId String @map("venue_id")
+  venue   Venue  @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@index([venueId, calculatedAt])
+  @@map("score_history")
+}
+
+// ============================================
+// REVIEW (Отзывы из разных источников)
+// ============================================
+
+model Review {
+  id         String   @id @default(cuid())
+  text       String   @db.Text
+  sentiment  Float
+  source     String
+  rating     Float?
+  authorName String?  @map("author_name")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  venueId String @map("venue_id")
+  venue   Venue  @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@index([venueId, createdAt])
+  @@index([sentiment])
+  @@map("reviews")
+}
+
+// ============================================
+// SOCIAL SIGNAL (Сигналы из соцсетей)
+// ============================================
+
+model SocialSignal {
+  id           String   @id @default(cuid())
+  source       String
+  mentionCount Int      @map("mention_count")
+  sentimentAvg Float    @map("sentiment_avg")
+  collectedAt  DateTime @default(now()) @map("collected_at")
+
+  venueId String @map("venue_id")
+  venue   Venue  @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@index([venueId, collectedAt])
+  @@map("social_signals")
+}
