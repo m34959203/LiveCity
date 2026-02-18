@@ -1,0 +1,49 @@
+"use client";
+
+import { Marker } from "react-map-gl/mapbox";
+import type { VenueListItem } from "@/types/venue";
+
+interface VenueMarkerProps {
+  venue: VenueListItem;
+  isSelected: boolean;
+  onClick: () => void;
+}
+
+function markerColor(score: number): string {
+  if (score >= 8) return "#10b981";
+  if (score >= 5) return "#f59e0b";
+  return "#71717a";
+}
+
+export function VenueMarker({ venue, isSelected, onClick }: VenueMarkerProps) {
+  const color = markerColor(venue.liveScore);
+  const scale = isSelected ? 1.3 : 1;
+
+  return (
+    <Marker
+      latitude={venue.latitude}
+      longitude={venue.longitude}
+      anchor="center"
+      onClick={(e) => {
+        e.originalEvent.stopPropagation();
+        onClick();
+      }}
+    >
+      <div
+        className="cursor-pointer transition-transform duration-200"
+        style={{ transform: `scale(${scale})` }}
+        title={`${venue.name} — ${venue.liveScore}`}
+      >
+        <div
+          className="flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold text-white shadow-lg"
+          style={{
+            backgroundColor: color,
+            boxShadow: `0 0 10px ${color}80`,
+          }}
+        >
+          {venue.liveScore.toFixed(0)}
+        </div>
+      </div>
+    </Marker>
+  );
+}
