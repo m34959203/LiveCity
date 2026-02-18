@@ -29,13 +29,26 @@ export default function Home() {
   const [searchInterpretation, setSearchInterpretation] = useState("");
   const [searchLoading, setSearchLoading] = useState(false);
   const [showSearchResults, setShowSearchResults] = useState(false);
+  const [venuesError, setVenuesError] = useState(false);
 
   // Load venues
   useEffect(() => {
     fetch("/api/venues?limit=100")
       .then((r) => r.json())
       .then((res) => setVenues(res.data || []))
-      .catch(() => {});
+      .catch(() => setVenuesError(true));
+  }, []);
+
+  // Close panels on Escape
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setSelectedVenueId(null);
+        setShowSearchResults(false);
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
   }, []);
 
   // AI Search
@@ -97,6 +110,13 @@ export default function Home() {
         venueId={selectedVenueId}
         onClose={() => setSelectedVenueId(null)}
       />
+
+      {/* Error toast */}
+      {venuesError && (
+        <div className="absolute bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-lg border border-red-800 bg-red-950/90 px-4 py-2 text-sm text-red-300 backdrop-blur">
+          Не удалось загрузить заведения. Проверьте подключение к БД.
+        </div>
+      )}
     </div>
   );
 }

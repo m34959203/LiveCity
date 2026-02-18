@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useReducer } from "react";
 import { LiveScoreBadge } from "@/components/ui/LiveScoreBadge";
 import type { VenueDetail } from "@/types/venue";
 
@@ -9,27 +9,55 @@ interface VenueDetailsProps {
   onClose: () => void;
 }
 
+type State = {
+  venue: VenueDetail | null;
+  loading: boolean;
+};
+
+type Action =
+  | { type: "FETCH_START" }
+  | { type: "FETCH_OK"; venue: VenueDetail }
+  | { type: "FETCH_ERR" }
+  | { type: "RESET" };
+
+function reducer(_state: State, action: Action): State {
+  switch (action.type) {
+    case "FETCH_START":
+      return { venue: null, loading: true };
+    case "FETCH_OK":
+      return { venue: action.venue, loading: false };
+    case "FETCH_ERR":
+      return { venue: null, loading: false };
+    case "RESET":
+      return { venue: null, loading: false };
+  }
+}
+
 export function VenueDetails({ venueId, onClose }: VenueDetailsProps) {
-  const [venue, setVenue] = useState<VenueDetail | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [state, dispatch] = useReducer(reducer, { venue: null, loading: false });
+
+  const loadVenue = useCallback((id: string) => {
+    dispatch({ type: "FETCH_START" });
+    fetch(`/api/venues/${id}`)
+      .then((r) => r.json())
+      .then((res) => dispatch({ type: "FETCH_OK", venue: res.data }))
+      .catch(() => dispatch({ type: "FETCH_ERR" }));
+  }, []);
 
   useEffect(() => {
     if (!venueId) {
-      setVenue(null);
+      dispatch({ type: "RESET" });
       return;
     }
-    setLoading(true);
-    fetch(`/api/venues/${venueId}`)
-      .then((r) => r.json())
-      .then((res) => setVenue(res.data))
-      .catch(() => setVenue(null))
-      .finally(() => setLoading(false));
-  }, [venueId]);
+    loadVenue(venueId);
+  }, [venueId, loadVenue]);
+
+  const { venue, loading } = state;
 
   if (!venueId) return null;
 
   return (
-    <div className="fixed right-0 top-0 z-50 flex h-full w-full max-w-sm flex-col border-l border-zinc-800 bg-zinc-950 shadow-2xl">
+    <div className="fixed inset-x-0 bottom-0 z-50 flex max-h-[70vh] flex-col rounded-t-2xl border-t border-zinc-800 bg-zinc-950 shadow-2xl sm:inset-x-auto sm:bottom-auto sm:right-0 sm:top-0 sm:h-full sm:max-h-full sm:w-full sm:max-w-sm sm:rounded-none sm:border-l sm:border-t-0">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-zinc-800 p-4">
         <h2 className="text-lg font-semibold text-white">

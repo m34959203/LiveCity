@@ -21,7 +21,7 @@ export function SearchResults({
   if (!isLoading && results.length === 0) return null;
 
   return (
-    <div className="absolute left-4 top-24 z-20 w-80 max-h-[60vh] overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-950/95 p-3 shadow-2xl backdrop-blur">
+    <div className="absolute left-4 right-4 top-24 z-20 max-h-[60vh] overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-950/95 p-3 shadow-2xl backdrop-blur sm:right-auto sm:w-80">
       <div className="mb-2 flex items-center justify-between">
         <span className="text-xs font-medium text-emerald-400">
           AI-результаты
