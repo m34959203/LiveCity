@@ -92,16 +92,15 @@ export class Apify2GisClient {
     }
 
     try {
+      // Try Apify standard startUrls format (array of {url} objects)
       const input = {
-        startUrls: [searchUrl],
+        startUrls: [{ url: searchUrl }],
         maxPlaces: maxItems,
         language: "ru",
       };
 
-      logger.info("2GIS Apify: starting actor run", {
+      logger.info(`2GIS Apify: starting actor run | ${searchUrl} | input=${JSON.stringify(input).slice(0, 300)}`, {
         endpoint: "Apify2GisClient.searchPlaces",
-        searchUrl,
-        maxPlaces: maxItems,
       });
 
       // Start actor run with synchronous wait (up to 120s)
@@ -119,9 +118,7 @@ export class Apify2GisClient {
         const errorBody = await runRes.text().catch(() => "(no body)");
         logger.warn("2GIS Apify discovery: actor run failed", {
           endpoint: "Apify2GisClient.searchPlaces",
-          error: `${runRes.status} ${runRes.statusText}`,
-          searchUrl,
-          responseBody: errorBody.slice(0, 500),
+          error: `${runRes.status} ${runRes.statusText} | url=${searchUrl} | body=${errorBody.slice(0, 400)}`,
         });
         return [];
       }
