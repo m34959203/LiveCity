@@ -1,22 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { GooglePlacesClient, type TextSearchResult } from "@/lib/google-places";
 import { Apify2GisClient, type TwoGisPlace } from "@/lib/apify-2gis";
 import { logger } from "@/lib/logger";
 
 /**
  * POST /api/cron/venue-scout
  *
- * CITY RADAR — Automatic venue discovery.
+ * CITY RADAR — Automatic venue discovery via 2GIS.
  * Runs weekly (Sunday night) via external cron trigger.
  *
- * Sources:
- *   1. Google Places API Text Search — discover by category queries
- *   2. Apify 2GIS Places Scraper — discover from 2GIS catalog
+ * Source: Apify 2GIS Places Scraper
  *
  * Pipeline:
  *   1. For each city, run search queries across categories
- *   2. Collect all place_ids / names
+ *   2. Collect all discovered places
  *   3. Cross-reference with existing venues in DB
  *   4. Create new venues with appropriate category mapping
  *   5. New venues are picked up by sync-pulse for AI analysis
@@ -24,13 +21,13 @@ import { logger } from "@/lib/logger";
  * Auth: Bearer CRON_SECRET
  */
 
-// --- City configurations (5 KZ cities, Жезказган — priority) ---
+// --- City configurations (5 KZ cities, Алматы — priority) ---
 const CITIES = [
   {
-    name: "Жезказган",
-    lat: 47.7833,
-    lng: 67.7144,
-    radius: 6000,
+    name: "Алматы",
+    lat: 43.2220,
+    lng: 76.8512,
+    radius: 8000,
   },
   {
     name: "Астана",
@@ -39,22 +36,22 @@ const CITIES = [
     radius: 8000,
   },
   {
-    name: "Караганда",
-    lat: 49.8047,
-    lng: 73.1094,
-    radius: 7000,
-  },
-  {
     name: "Шымкент",
     lat: 42.3417,
     lng: 69.5967,
     radius: 7000,
   },
   {
-    name: "Алматы",
-    lat: 43.238,
-    lng: 76.945,
-    radius: 8000,
+    name: "Караганда",
+    lat: 49.8047,
+    lng: 73.1094,
+    radius: 7000,
+  },
+  {
+    name: "Жезказган",
+    lat: 47.7833,
+    lng: 67.7144,
+    radius: 6000,
   },
 ];
 
@@ -68,19 +65,6 @@ const CATEGORY_QUERIES = [
   { query: "развлечения боулинг кинотеатр", categorySlug: "entertainment" },
 ];
 
-// Google Places types → our category slug mapping
-const GOOGLE_TYPE_TO_CATEGORY: Record<string, string> = {
-  restaurant: "restaurant",
-  cafe: "cafe",
-  bar: "bar",
-  night_club: "bar",
-  park: "park",
-  shopping_mall: "mall",
-  amusement_park: "entertainment",
-  movie_theater: "entertainment",
-  bowling_alley: "entertainment",
-};
-
 // 2GIS category keywords → our category slug
 const TWOGIS_CATEGORY_MAP: [RegExp, string][] = [
   [/ресторан/i, "restaurant"],
@@ -91,7 +75,6 @@ const TWOGIS_CATEGORY_MAP: [RegExp, string][] = [
   [/развлеч|кинотеатр|боулинг/i, "entertainment"],
 ];
 
-const googleClient = new GooglePlacesClient();
 const twoGisClient = new Apify2GisClient();
 
 export async function POST(request: NextRequest) {
@@ -106,16 +89,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const googleConfigured = googleClient.isConfigured();
-  const twoGisConfigured = twoGisClient.isConfigured();
-
-  if (!googleConfigured && !twoGisConfigured) {
+  if (!twoGisClient.isConfigured()) {
     return NextResponse.json(
       {
         error: {
           code: "NOT_CONFIGURED",
           message:
-            "Neither GOOGLE_PLACES_API_KEY nor APIFY_TOKEN+APIFY_2GIS_PLACES_ACTOR configured",
+            "APIFY_TOKEN+APIFY_2GIS_PLACES_ACTOR not configured",
         },
       },
       { status: 503 },
@@ -125,17 +105,17 @@ export async function POST(request: NextRequest) {
   const startTime = Date.now();
 
   try {
-    // --- Load existing googlePlaceIds for dedup ---
+    // --- Load existing venues for dedup ---
     const existingVenues = await prisma.venue.findMany({
-      select: { googlePlaceId: true, name: true },
+      select: { name: true, twoGisUrl: true },
     });
-    const existingPlaceIds = new Set(
-      existingVenues
-        .map((v) => v.googlePlaceId)
-        .filter((id): id is string => !!id),
-    );
     const existingNames = new Set(
       existingVenues.map((v) => v.name.toLowerCase()),
+    );
+    const existingTwoGisUrls = new Set(
+      existingVenues
+        .map((v) => v.twoGisUrl)
+        .filter((url): url is string => !!url),
     );
 
     // --- Load categories from DB ---
@@ -152,58 +132,29 @@ export async function POST(request: NextRequest) {
         endpoint: "/api/cron/venue-scout",
       });
 
-      // Collect discovered places from both sources
+      // Collect discovered places from 2GIS
       const discoveredPlaces: DiscoveredPlace[] = [];
 
-      // --- Source 1: Google Places Text Search ---
-      if (googleConfigured) {
-        for (const cq of CATEGORY_QUERIES) {
-          try {
-            const results = await googleClient.textSearch(
-              `${cq.query} ${city.name}`,
-              city.lat,
-              city.lng,
-              city.radius,
+      for (const cq of CATEGORY_QUERIES) {
+        try {
+          const places = await twoGisClient.searchPlaces(
+            cq.query,
+            city.name,
+            20,
+          );
+
+          for (const p of places) {
+            discoveredPlaces.push(
+              twoGisResultToDiscovered(p, cq.categorySlug),
             );
-
-            for (const r of results) {
-              discoveredPlaces.push(
-                googleResultToDiscovered(r, cq.categorySlug),
-              );
-            }
-          } catch (error) {
-            const msg = error instanceof Error ? error.message : String(error);
-            errors.push(`Google/${cq.query}/${city.name}: ${msg}`);
           }
-
-          // Delay between queries to avoid rate limits
-          await sleep(1000);
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          errors.push(`2GIS/${cq.query}/${city.name}: ${msg}`);
         }
-      }
 
-      // --- Source 2: Apify 2GIS Places Scraper ---
-      if (twoGisConfigured) {
-        for (const cq of CATEGORY_QUERIES) {
-          try {
-            const places = await twoGisClient.searchPlaces(
-              cq.query,
-              city.name,
-              20,
-            );
-
-            for (const p of places) {
-              discoveredPlaces.push(
-                twoGisResultToDiscovered(p, cq.categorySlug),
-              );
-            }
-          } catch (error) {
-            const msg = error instanceof Error ? error.message : String(error);
-            errors.push(`2GIS/${cq.query}/${city.name}: ${msg}`);
-          }
-
-          // Delay between 2GIS queries
-          await sleep(1000);
-        }
+        // Delay between 2GIS queries
+        await sleep(1000);
       }
 
       totalDiscovered += discoveredPlaces.length;
@@ -212,8 +163,8 @@ export async function POST(request: NextRequest) {
       const seen = new Set<string>();
 
       for (const place of discoveredPlaces) {
-        // Skip if already in DB by googlePlaceId
-        if (place.googlePlaceId && existingPlaceIds.has(place.googlePlaceId)) {
+        // Skip if already in DB by 2GIS URL
+        if (place.twoGisUrl && existingTwoGisUrls.has(place.twoGisUrl)) {
           continue;
         }
 
@@ -223,7 +174,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Skip duplicates within this batch
-        const dedupeKey = place.googlePlaceId || place.name.toLowerCase();
+        const dedupeKey = place.twoGisUrl || place.name.toLowerCase();
         if (seen.has(dedupeKey)) continue;
         seen.add(dedupeKey);
 
@@ -248,7 +199,6 @@ export async function POST(request: NextRequest) {
               address: place.address,
               latitude: place.latitude,
               longitude: place.longitude,
-              googlePlaceId: place.googlePlaceId || null,
               twoGisUrl: place.twoGisUrl || null,
               phone: place.phone || null,
               categoryId,
@@ -258,8 +208,8 @@ export async function POST(request: NextRequest) {
           });
 
           // Track for dedup within this run
-          if (place.googlePlaceId) {
-            existingPlaceIds.add(place.googlePlaceId);
+          if (place.twoGisUrl) {
+            existingTwoGisUrls.add(place.twoGisUrl);
           }
           existingNames.add(place.name.toLowerCase());
           totalNew++;
@@ -292,8 +242,7 @@ export async function POST(request: NextRequest) {
         totalNew,
         cities: CITIES.map((c) => c.name),
         sources: {
-          google: googleConfigured,
-          twoGis: twoGisConfigured,
+          twoGis: true,
         },
         errors: errors.length > 0 ? errors : undefined,
         elapsedMs: elapsed,
@@ -327,33 +276,8 @@ interface DiscoveredPlace {
   latitude: number;
   longitude: number;
   categorySlug: string;
-  googlePlaceId?: string;
   twoGisUrl?: string;
   phone?: string;
-}
-
-/** Convert Google Text Search result to unified format */
-function googleResultToDiscovered(
-  r: TextSearchResult,
-  fallbackCategory: string,
-): DiscoveredPlace {
-  // Try to map Google types to our categories
-  let categorySlug = fallbackCategory;
-  for (const type of r.types) {
-    if (GOOGLE_TYPE_TO_CATEGORY[type]) {
-      categorySlug = GOOGLE_TYPE_TO_CATEGORY[type];
-      break;
-    }
-  }
-
-  return {
-    name: r.name,
-    address: r.formatted_address,
-    latitude: r.latitude,
-    longitude: r.longitude,
-    categorySlug,
-    googlePlaceId: r.place_id,
-  };
 }
 
 /** Convert 2GIS result to unified format */

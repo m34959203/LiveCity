@@ -100,11 +100,13 @@ export class Apify2GisClient {
    * @param query - Search query (e.g. "кафе", "рестораны")
    * @param city - City name (e.g. "Алматы")
    * @param maxItems - Max results to fetch (default 20)
+   * @param timeoutMs - Request timeout in ms (default 120s, use shorter for interactive search)
    */
   async searchPlaces(
     query: string,
     city: string,
     maxItems: number = 20,
+    timeoutMs: number = 120_000,
   ): Promise<TwoGisPlace[]> {
     // Log full schema on first call (non-blocking)
     this.logSchemaOnce().catch(() => {});
@@ -133,7 +135,7 @@ export class Apify2GisClient {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(input),
-          signal: AbortSignal.timeout(120_000),
+          signal: AbortSignal.timeout(timeoutMs),
         },
       );
 

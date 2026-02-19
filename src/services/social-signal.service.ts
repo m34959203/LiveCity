@@ -1,20 +1,17 @@
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
-import { GooglePlacesClient, type GoogleReview } from "@/lib/google-places";
 import { geminiModel } from "@/lib/gemini";
 
 // ============================================
 // Social Signal Service — Multi-source collection
 // ============================================
 // Collects social signals from:
-//   1. Google Places API — reviews, ratings, review count
-//   2. 2GIS — reviews via Apify scraper (when configured)
-//   3. Instagram — mentions via Apify scraper (when configured)
-//   4. Gemini AI — sentiment analysis on review texts
+//   1. 2GIS — reviews via Apify scraper
+//   2. Instagram — mentions via Apify scraper (when configured)
+//   3. Gemini AI — sentiment analysis on review texts
 //
 // Architecture: each source is a private method.
 // Enable sources by setting env vars:
-//   GOOGLE_PLACES_API_KEY — Google reviews
 //   APIFY_TOKEN + APIFY_2GIS_ACTOR — 2GIS reviews
 //   APIFY_TOKEN + APIFY_INSTA_ACTOR — Instagram mentions
 // ============================================
@@ -31,13 +28,10 @@ interface VenueForCollection {
   name: string;
   latitude: number;
   longitude: number;
-  googlePlaceId: string | null;
   twoGisId: string | null;
   twoGisUrl: string | null;
   instagramHandle: string | null;
 }
-
-const googleClient = new GooglePlacesClient();
 
 export class SocialSignalService {
   // ------------------------------------------
@@ -51,22 +45,12 @@ export class SocialSignalService {
         name: true,
         latitude: true,
         longitude: true,
-        googlePlaceId: true,
         twoGisId: true,
         twoGisUrl: true,
         instagramHandle: true,
       },
     });
     if (!venue) return;
-
-    // Google Maps — real reviews & ratings
-    if (googleClient.isConfigured()) {
-      await this.collectGoogleSignals(venue);
-    } else {
-      logger.warn("GOOGLE_PLACES_API_KEY not set — skipping Google signals", {
-        endpoint: "SocialSignalService.collectSignals",
-      });
-    }
 
     // 2GIS — reviews via Apify scraper
     if (process.env.APIFY_TOKEN && process.env.APIFY_2GIS_ACTOR && venue.twoGisUrl) {
@@ -90,7 +74,6 @@ export class SocialSignalService {
         name: true,
         latitude: true,
         longitude: true,
-        googlePlaceId: true,
         twoGisId: true,
         twoGisUrl: true,
         instagramHandle: true,
@@ -115,98 +98,6 @@ export class SocialSignalService {
     });
 
     return collected;
-  }
-
-  // ------------------------------------------
-  // GOOGLE MAPS: Real reviews + ratings
-  // ------------------------------------------
-  private static async collectGoogleSignals(
-    venue: VenueForCollection,
-  ): Promise<void> {
-    // 1. Resolve Google Place ID if missing
-    let placeId = venue.googlePlaceId;
-
-    if (!placeId) {
-      placeId = await googleClient.findPlaceId(
-        venue.name,
-        venue.latitude,
-        venue.longitude,
-      );
-
-      if (placeId) {
-        await prisma.venue.update({
-          where: { id: venue.id },
-          data: { googlePlaceId: placeId },
-        });
-        logger.info(`Resolved placeId for "${venue.name}": ${placeId}`, {
-          endpoint: "SocialSignalService.collectGoogleSignals",
-        });
-      } else {
-        logger.warn(`Could not resolve placeId for "${venue.name}"`, {
-          endpoint: "SocialSignalService.collectGoogleSignals",
-        });
-        return;
-      }
-    }
-
-    // 2. Fetch place details
-    const details = await googleClient.getPlaceDetails(placeId);
-    if (!details) return;
-
-    // 3. Store new reviews and compute sentiment
-    let newReviewCount = 0;
-    let sentimentSum = 0;
-
-    if (details.reviews.length > 0) {
-      // Batch sentiment analysis for all new reviews at once (1 Gemini call)
-      const newReviews = await this.filterNewReviews(venue.id, details.reviews);
-
-      if (newReviews.length > 0) {
-        const sentiments = await this.batchAnalyzeSentiment(newReviews);
-
-        for (let i = 0; i < newReviews.length; i++) {
-          const review = newReviews[i];
-          const sentiment = sentiments[i] ?? this.ratingToSentiment(review.rating);
-
-          await prisma.review.create({
-            data: {
-              venueId: venue.id,
-              text: review.text || `Rating: ${review.rating}/5`,
-              sentiment,
-              source: "google",
-              rating: review.rating,
-              authorName: review.author_name,
-            },
-          });
-
-          sentimentSum += sentiment;
-          newReviewCount++;
-        }
-      }
-    }
-
-    // 4. Create SocialSignal record with real data
-    //    mentionCount = new reviews found in this collection
-    //    sentimentAvg = from Gemini analysis or fallback to rating-based
-    const sentimentAvg =
-      newReviewCount > 0
-        ? sentimentSum / newReviewCount
-        : this.ratingToSentiment(details.rating);
-
-    await prisma.socialSignal.create({
-      data: {
-        venueId: venue.id,
-        source: "google_maps",
-        mentionCount: newReviewCount > 0 ? newReviewCount : 1,
-        sentimentAvg: Math.round(sentimentAvg * 100) / 100,
-      },
-    });
-
-    logger.info(
-      `Google signals: "${venue.name}" — ${newReviewCount} new reviews, ` +
-        `rating ${details.rating}, total ${details.user_ratings_total}`,
-      { endpoint: "SocialSignalService.collectGoogleSignals" },
-    );
   }
 
   // ------------------------------------------
@@ -317,12 +208,9 @@ export class SocialSignalService {
       // Sentiment analysis
       const sentiments = await this.batchAnalyzeSentiment(
         newReviews.map((r) => ({
-          author_name: r.author || "Гость",
+          author: r.author || "Гость",
           rating: r.rating || 3,
           text: r.text || "",
-          time: Date.now() / 1000,
-          language: "ru",
-          relative_time_description: "",
         })),
       );
 
@@ -489,12 +377,9 @@ export class SocialSignalService {
       if (captions.length > 0) {
         const sentiments = await this.batchAnalyzeSentiment(
           captions.map((text) => ({
-            author_name: venue.instagramHandle || "instagram",
+            author: venue.instagramHandle || "instagram",
             rating: 4,
             text,
-            time: Date.now() / 1000,
-            language: "ru",
-            relative_time_description: "",
           })),
         );
         avgSentiment =
@@ -536,7 +421,7 @@ export class SocialSignalService {
    * Returns array of scores in [-1, 1] range.
    */
   private static async batchAnalyzeSentiment(
-    reviews: GoogleReview[],
+    reviews: { author: string; rating: number; text: string }[],
   ): Promise<number[]> {
     if (reviews.length === 0) return [];
 
@@ -578,25 +463,6 @@ export class SocialSignalService {
   // ------------------------------------------
   // HELPERS
   // ------------------------------------------
-
-  /** Filter out reviews already stored in our DB */
-  private static async filterNewReviews(
-    venueId: string,
-    reviews: GoogleReview[],
-  ): Promise<GoogleReview[]> {
-    const existing = await prisma.review.findMany({
-      where: { venueId, source: "google" },
-      select: { authorName: true, text: true },
-    });
-
-    const existingKeys = new Set(
-      existing.map((r) => `${r.authorName}::${r.text?.slice(0, 50)}`),
-    );
-
-    return reviews.filter(
-      (r) => !existingKeys.has(`${r.author_name}::${r.text?.slice(0, 50)}`),
-    );
-  }
 
   /** Convert 1-5 star rating to -1..1 sentiment */
   private static ratingToSentiment(rating: number): number {
