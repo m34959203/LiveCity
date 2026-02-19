@@ -1,12 +1,13 @@
 # LiveCity — Схема базы данных
 
-**Версия:** 0.1 (Demo)
-**Дата:** 2026-02-18
-**СУБД:** PostgreSQL 15 + PostGIS
+**Версия:** 1.0 (Demo — реализована)
+**Обновлено:** 2026-02-18
+**СУБД:** PostgreSQL
+**ORM:** Prisma 6
 
 ---
 
-## 1. ER-диаграмма (упрощённая)
+## 1. ER-диаграмма
 
 ```
 ┌──────────────┐     ┌──────────────────┐     ┌─────────────────┐
@@ -14,17 +15,19 @@
 │              │     │                  │     │                 │
 │ id           │     │ id               │     │ venue_id        │
 │ name         │     │ name             │     │ tag_id          │
-│ icon         │     │ category_id (FK) │     └────────┬────────┘
-│ color        │     │ description      │              │
-└──────────────┘     │ address          │     ┌────────▼────────┐
-                     │ location (POINT) │     │      Tag        │
-                     │ phone            │     │                 │
-                     │ whatsapp         │     │ id              │
-                     │ working_hours    │     │ name            │
-                     │ photo_urls[]     │     │ slug            │
-                     │ live_score       │     └─────────────────┘
-                     │ created_at       │
-                     │ updated_at       │
+│ slug         │     │ slug             │     └────────┬────────┘
+│ icon         │     │ category_id (FK) │              │
+│ color        │     │ description      │     ┌────────▼────────┐
+└──────────────┘     │ ai_description   │     │      Tag        │
+                     │ address          │     │                 │
+                     │ latitude         │     │ id              │
+                     │ longitude        │     │ name            │
+                     │ phone            │     │ slug            │
+                     │ whatsapp         │     └─────────────────┘
+                     │ working_hours    │
+                     │ photo_urls[]     │
+                     │ live_score       │
+                     │ is_active        │
                      └────────┬─────────┘
                               │
               ┌───────────────┼───────────────┐
@@ -37,53 +40,51 @@
     │ score         │ │ text         │ │ source         │
     │ calculated_at │ │ sentiment    │ │ mention_count  │
     └───────────────┘ │ source       │ │ sentiment_avg  │
-                      │ created_at   │ │ collected_at   │
-                      └──────────────┘ └────────────────┘
+                      │ rating       │ │ collected_at   │
+                      │ author_name  │ └────────────────┘
+                      │ created_at   │
+                      └──────────────┘
 ```
+
+**7 моделей:** Venue, Category, Tag, VenueTag, ScoreHistory, Review, SocialSignal
 
 ---
 
-## 2. Prisma Schema
+## 2. Prisma Schema (актуальная)
 
 ```prisma
 // prisma/schema.prisma
 
 generator client {
-  provider        = "prisma-client-js"
-  previewFeatures = ["postgresqlExtensions"]
+  provider = "prisma-client-js"
 }
 
 datasource db {
-  provider   = "postgresql"
-  url        = env("DATABASE_URL")
-  extensions = [postgis]
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
-// ============================================
-// VENUE (Заведение)
-// ============================================
-
 model Venue {
-  id            String    @id @default(cuid())
+  id            String   @id @default(cuid())
   name          String
-  slug          String    @unique
-  description   String?   @db.Text
-  aiDescription String?   @db.Text  @map("ai_description")
+  slug          String   @unique
+  description   String?  @db.Text
+  aiDescription String?  @db.Text @map("ai_description")
   address       String
   latitude      Float
   longitude     Float
   phone         String?
   whatsapp      String?
-  photoUrls     String[]  @map("photo_urls")
-  workingHours  Json?     @map("working_hours")
-  liveScore     Float     @default(0) @map("live_score")
-  isActive      Boolean   @default(true) @map("is_active")
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
+  photoUrls     String[] @map("photo_urls")
+  workingHours  Json?    @map("working_hours")
+  liveScore     Float    @default(0) @map("live_score")
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
-  // Relations
-  categoryId    String    @map("category_id")
-  category      Category  @relation(fields: [categoryId], references: [id])
+  categoryId String   @map("category_id")
+  category   Category @relation(fields: [categoryId], references: [id])
+
   tags          VenueTag[]
   scoreHistory  ScoreHistory[]
   reviews       Review[]
@@ -95,25 +96,17 @@ model Venue {
   @@map("venues")
 }
 
-// ============================================
-// CATEGORY (Категория заведения)
-// ============================================
-
 model Category {
-  id    String  @id @default(cuid())
-  name  String  @unique
-  slug  String  @unique
-  icon  String  // emoji или icon name
-  color String  // hex цвет для маркера
+  id    String @id @default(cuid())
+  name  String @unique
+  slug  String @unique
+  icon  String
+  color String
 
   venues Venue[]
 
   @@map("categories")
 }
-
-// ============================================
-// TAG (Теги/Фичи: Wi-Fi, парковка, терраса)
-// ============================================
 
 model Tag {
   id   String @id @default(cuid())
@@ -136,10 +129,6 @@ model VenueTag {
   @@map("venue_tags")
 }
 
-// ============================================
-// SCORE HISTORY (История Live Score)
-// ============================================
-
 model ScoreHistory {
   id           String   @id @default(cuid())
   score        Float
@@ -152,18 +141,14 @@ model ScoreHistory {
   @@map("score_history")
 }
 
-// ============================================
-// REVIEW (Отзывы — агрегированные из разных источников)
-// ============================================
-
 model Review {
-  id        String   @id @default(cuid())
-  text      String   @db.Text
-  sentiment Float    // -1.0 (негатив) ... +1.0 (позитив)
-  source    String   // "google", "2gis", "instagram", "manual"
-  rating    Float?   // оригинальный рейтинг источника (1-5)
-  authorName String? @map("author_name")
-  createdAt DateTime @default(now()) @map("created_at")
+  id         String   @id @default(cuid())
+  text       String   @db.Text
+  sentiment  Float    // -1.0 (негатив) ... +1.0 (позитив)
+  source     String   // "google", "2gis", "instagram", "manual"
+  rating     Float?
+  authorName String?  @map("author_name")
+  createdAt  DateTime @default(now()) @map("created_at")
 
   venueId String @map("venue_id")
   venue   Venue  @relation(fields: [venueId], references: [id], onDelete: Cascade)
@@ -172,10 +157,6 @@ model Review {
   @@index([sentiment])
   @@map("reviews")
 }
-
-// ============================================
-// SOCIAL SIGNAL (Сигналы из соцсетей)
-// ============================================
 
 model SocialSignal {
   id           String   @id @default(cuid())
@@ -194,20 +175,22 @@ model SocialSignal {
 
 ---
 
-## 3. Seed-данные для демо
+## 3. Seed-данные (реализовано)
 
-### 3.1. Категории
+### 3.1. Категории (6 штук)
 
-| Slug | Название | Иконка | Цвет |
-|---|---|---|---|
-| restaurant | Ресторан | fork-knife | #E74C3C |
-| cafe | Кафе | coffee | #F39C12 |
-| bar | Бар | beer | #9B59B6 |
-| park | Парк | tree | #27AE60 |
-| mall | ТРЦ | shopping-bag | #3498DB |
-| entertainment | Развлечения | sparkles | #E91E63 |
+| Slug | Название | Иконка | Цвет | Кол-во заведений |
+|---|---|---|---|---|
+| restaurant | Ресторан | fork-knife | #E74C3C | 20 |
+| cafe | Кафе | coffee | #F39C12 | 15 |
+| bar | Бар | beer | #9B59B6 | 10 |
+| park | Парк | tree | #27AE60 | 10 |
+| mall | ТРЦ | shopping-bag | #3498DB | 8 |
+| entertainment | Развлечения | sparkles | #E91E63 | 7 |
 
-### 3.2. Теги
+**Итого:** 70 заведений в Алматы
+
+### 3.2. Теги (12 штук)
 
 | Slug | Название |
 |---|---|
@@ -221,64 +204,69 @@ model SocialSignal {
 | business-lunch | Бизнес-ланч |
 | 24h | Круглосуточно |
 | delivery | Доставка |
+| hookah | Кальян |
+| karaoke | Караоке |
 
-### 3.3. Демо-заведения (примеры)
+### 3.3. Автогенерация при seed
 
-Seed должен содержать **50-100 заведений** Алматы. Примеры:
-
-| Название | Категория | Район | Live Score |
-|---|---|---|---|
-| Рестоbar | restaurant | Алмалинский | 8.7 |
-| Coffee Boom | cafe | Медеуский | 7.2 |
-| Парк 28 Панфиловцев | park | Медеуский | 9.1 |
-| Mega Park | mall | Бостандыкский | 6.5 |
-| Del Papa | restaurant | Бостандыкский | 8.3 |
-| Кофейня Чашка | cafe | Ауэзовский | 5.4 |
+- **Reviews:** 5-15 рандомных отзывов на заведение (из шаблонов), sentiment от -0.8 до +0.9
+- **Score History:** 30 дней данных для каждого заведения
+- **Social Signals:** 1-3 источника на заведение (instagram, tiktok, google_maps)
+- **Working Hours:** JSON с расписанием пн-вс
 
 ---
 
-## 4. Ключевые запросы
+## 4. Индексы
 
-### Геопространственный поиск (заведения в радиусе)
+| Таблица | Индекс | Назначение |
+|---|---|---|
+| venues | `(latitude, longitude)` | Геопоиск по bounds |
+| venues | `(live_score)` | Сортировка по рейтингу |
+| venues | `(category_id)` | Фильтрация по категории |
+| score_history | `(venue_id, calculated_at)` | История score по дате |
+| reviews | `(venue_id, created_at)` | Последние отзывы |
+| reviews | `(sentiment)` | Фильтрация негативных |
+| social_signals | `(venue_id, collected_at)` | Последние сигналы |
 
-```sql
-SELECT *,
-  ST_Distance(
-    ST_MakePoint(longitude, latitude)::geography,
-    ST_MakePoint($lng, $lat)::geography
-  ) AS distance_meters
-FROM venues
-WHERE ST_DWithin(
-  ST_MakePoint(longitude, latitude)::geography,
-  ST_MakePoint($lng, $lat)::geography,
-  $radius_meters
-)
-ORDER BY live_score DESC
-LIMIT 50;
+---
+
+## 5. Ключевые запросы (Prisma)
+
+### Геопоиск (заведения в bounds)
+
+```typescript
+prisma.venue.findMany({
+  where: {
+    isActive: true,
+    latitude: { gte: swLat, lte: neLat },
+    longitude: { gte: swLng, lte: neLng },
+  },
+  include: { category: true, tags: { include: { tag: true } } },
+  orderBy: { liveScore: "desc" },
+  take: 100,
+});
 ```
 
-### Heatmap-данные (агрегация по районам)
+### Heatmap (агрегация по grid buckets)
 
-```sql
-SELECT
-  ROUND(latitude::numeric, 3) as lat_bucket,
-  ROUND(longitude::numeric, 3) as lng_bucket,
-  AVG(live_score) as avg_score,
-  COUNT(*) as venue_count
-FROM venues
-WHERE is_active = true
-GROUP BY lat_bucket, lng_bucket;
+```typescript
+prisma.venue.findMany({
+  where: { isActive: true },
+  select: { latitude: true, longitude: true, liveScore: true },
+});
+// Затем группировка в JS: round(lat, 3) + round(lng, 3) → avg(score)
 ```
 
-### История Score для дашборда
+### District average
 
-```sql
-SELECT
-  DATE(calculated_at) as date,
-  AVG(score) as avg_score
-FROM score_history
-WHERE venue_id = $venueId
-  AND calculated_at >= NOW() - INTERVAL '30 days'
-GROUP BY DATE(calculated_at)
-ORDER BY date;
+```typescript
+prisma.venue.aggregate({
+  where: {
+    isActive: true,
+    latitude: { gte: lat - delta, lte: lat + delta },
+    longitude: { gte: lng - delta, lte: lng + delta },
+  },
+  _avg: { liveScore: true },
+  _count: true,
+});
 ```

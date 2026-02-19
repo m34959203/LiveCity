@@ -1,6 +1,6 @@
 # ADR-001: Выбор технологического стека
 
-**Статус:** Принято
+**Статус:** Принято и реализовано
 **Дата:** 2026-02-18
 **Участники:** Команда LiveCity
 
@@ -8,21 +8,16 @@
 
 ## Контекст
 
-LiveCity — платформа городской навигации с AI-ядром. Для первой демонстрации нужен стек, который позволит:
-- Быстро запустить работающий прототип (4-6 недель)
-- Показать карту с заведениями и Live Score
-- Продемонстрировать AI-поиск на естественном языке
-- Легко масштабировать после демо
+LiveCity — платформа городской навигации с AI-ядром. Для первой демонстрации нужен стек, который позволит быстро запустить прототип с картой, AI-поиском и бизнес-аналитикой.
 
-## Решение
+## Финальный стек (реализован)
 
-### Frontend + Backend: Next.js 14 (App Router) + TypeScript
+### Frontend + Backend: Next.js 16 (App Router) + TypeScript (strict)
 
 **Почему:**
-- Единый язык (TypeScript) для frontend и backend — меньше переключений контекста
-- API Routes позволяют держать backend внутри одного проекта на этапе MVP
-- SSR/SSG для SEO (важно для будущего органического трафика)
-- Огромная экосистема React-компонентов для карт, графиков, UI
+- Единый язык (TypeScript) для frontend и backend
+- API Routes позволяют держать backend внутри одного проекта
+- React 19 с Server Components
 - Деплой на Vercel в один клик
 
 **Альтернативы (отклонены):**
@@ -30,62 +25,68 @@ LiveCity — платформа городской навигации с AI-яд
 |---|---|
 | React SPA + Express | Два отдельных проекта — медленнее для MVP |
 | Vue/Nuxt | Меньше готовых компонентов для карт и AI |
-| React Native (mobile-first) | Демо проще показать в браузере, мобилка — post-MVP |
 
-### База данных: PostgreSQL + Prisma ORM
+### База данных: PostgreSQL + Prisma 6
 
 **Почему:**
-- PostgreSQL: расширения PostGIS для геопространственных запросов (критично для карты)
-- Prisma: type-safe ORM, автогенерация типов, миграции из коробки
-- Надёжность и масштабируемость PostgreSQL проверена индустрией
+- PostgreSQL: надёжность, геопространственные запросы через индексы (lat/lng)
+- Prisma 6: type-safe ORM, автогенерация типов, миграции
+
+**Примечание:** Изначально планировался Prisma 7, но из-за breaking changes (удалён `url` в datasource) откатились на Prisma 6.
 
 **Альтернативы (отклонены):**
 | Вариант | Причина отклонения |
 |---|---|
-| MongoDB | Слабее для геопространственных JOIN-запросов |
-| Supabase | Vendor lock-in, меньше контроля |
+| MongoDB | Слабее для реляционных JOIN-запросов |
 | Drizzle ORM | Менее зрелая экосистема |
 
-### AI: Google Gemini API
+### AI: Google Gemini 2.0 Flash
 
 **Почему:**
-- Упомянут в Vision как основной AI-провайдер
-- Мощные возможности для NLP/semantic search
-- Конкурентные цены для стартапа
-- Хорошая поддержка мультиязычности (русский, казахский)
+- Быстрая модель для real-time поиска
+- Хорошая поддержка русского языка
+- Конкурентные цены
 
-**Mitigation (снижение рисков):**
-- Абстрагировать AI-вызовы через сервисный слой (интерфейс `AIProvider`)
-- В будущем: возможность подключить OpenAI/Anthropic как fallback
+**Использование (3 точки):**
+1. Semantic Search — ранжирование заведений по NL-запросу
+2. Action Plan — генерация 3 рекомендаций для бизнеса
+3. Complaint Grouping — группировка негативных отзывов по темам
 
-### Карты: Mapbox GL JS
+### Карты: Mapbox GL JS (react-map-gl v8)
 
 **Почему:**
-- Лучший SDK для кастомных карт с heatmap-слоями
-- Поддержка 3D, кластеризации, анимаций — для wow-эффекта на демо
-- Бесплатный tier: 50,000 загрузок карт/месяц (достаточно для MVP)
-- React-обёртка `react-map-gl`
+- Лучший SDK для кастомных карт с heatmap
+- Стиль `dark-v11` — визуально впечатляющий для демо
+- Бесплатный tier: 50,000 загрузок/месяц
 
 **Альтернативы (отклонены):**
 | Вариант | Причина отклонения |
 |---|---|
 | Google Maps | Дороже, менее кастомизируемый |
-| Leaflet | Слабее для heatmap и 3D |
-| 2GIS API | Ограниченная кастомизация |
+| Leaflet | Слабее для heatmap |
 
-### UI: Tailwind CSS + shadcn/ui
-
-**Почему:**
-- Tailwind: быстрая стилизация без CSS-файлов
-- shadcn/ui: готовые accessible-компоненты (не библиотека, а копируемый код — полный контроль)
-- Единый design system из коробки
-
-### Деплой (Demo): Vercel + Neon (Serverless PostgreSQL)
+### UI: Tailwind CSS 4
 
 **Почему:**
-- Vercel: zero-config деплой Next.js, preview-ветки, CDN
-- Neon: serverless PostgreSQL с PostGIS, бесплатный tier
-- Весь стек запускается бесплатно для демо
+- Utility-first — быстрая стилизация
+- v4: встроенная поддержка в Next.js, нет отдельного tailwind.config
+
+**Примечание:** Отказались от shadcn/ui в пользу кастомных компонентов для большего контроля.
+
+### Графики: Recharts
+
+- LineChart для Score History (30 дней) на дашборде
+
+### Тестирование: Vitest + React Testing Library
+
+**Почему:**
+- Vitest: нативная ESM-поддержка, совместимость с Vite
+- React Testing Library: тестирование поведения, а не реализации
+- 37 тестов: сервисы, компоненты, type contracts
+
+### CI/CD: GitHub Actions
+
+3 jobs: Lint & Typecheck, Tests, Build.
 
 ---
 
@@ -94,23 +95,27 @@ LiveCity — платформа городской навигации с AI-яд
 ```
 ┌─────────────────────────────────────────┐
 │              FRONTEND                    │
-│  Next.js 14 + TypeScript                │
-│  React 18 + Tailwind CSS + shadcn/ui    │
-│  react-map-gl (Mapbox GL JS)            │
+│  Next.js 16 + TypeScript (strict)       │
+│  React 19 + Tailwind CSS 4             │
+│  react-map-gl v8 (Mapbox dark-v11)     │
+│  Recharts (LineChart)                   │
 ├─────────────────────────────────────────┤
 │              BACKEND (API Routes)        │
-│  Next.js API Routes + TypeScript        │
-│  Prisma ORM                             │
-│  Google Gemini AI SDK                   │
+│  Next.js App Router API Routes          │
+│  Prisma 6 ORM                           │
+│  Google Gemini 2.0 Flash SDK           │
 ├─────────────────────────────────────────┤
 │              DATA                        │
-│  PostgreSQL + PostGIS (Neon)            │
-│  Prisma Migrations                      │
+│  PostgreSQL                             │
+│  Prisma Migrations + Seed              │
+├─────────────────────────────────────────┤
+│              TESTING                     │
+│  Vitest + React Testing Library         │
+│  37 тестов (services + components)      │
 ├─────────────────────────────────────────┤
 │              INFRA                       │
 │  Vercel (hosting)                       │
-│  GitHub Actions (CI/CD)                 │
-│  Neon (database)                        │
+│  GitHub Actions (3 CI jobs)             │
 └─────────────────────────────────────────┘
 ```
 
@@ -118,10 +123,10 @@ LiveCity — платформа городской навигации с AI-яд
 
 **Положительные:**
 - Один язык (TypeScript) — быстрая разработка
-- Бесплатный деплой для демо-стадии
-- Гео-запросы через PostGIS
-- Готовые UI-компоненты ускоряют фронтенд
+- Бесплатный деплой для демо
+- 37 тестов обеспечивают стабильность
+- Все 5 фаз разработки завершены в срок
 
 **Отрицательные:**
-- Next.js API Routes не заменят полноценный backend при масштабировании (миграция на отдельный сервис позже)
-- Зависимость от Vercel для деплоя (можно мигрировать на Docker + VPS)
+- Next.js API Routes не заменят полноценный backend при масштабировании
+- Зависимость от Vercel (миграция на Docker + VPS возможна)

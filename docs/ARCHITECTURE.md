@@ -1,20 +1,20 @@
 # LiveCity — Архитектура системы
 
-**Версия:** 0.1 (Demo)
-**Дата:** 2026-02-18
+**Версия:** 1.0 (Demo — все 5 фаз завершены)
+**Обновлено:** 2026-02-18
 
 ---
 
 ## 1. Обзор архитектуры
 
-Для демо-версии используется **модульный монолит** на базе Next.js. Это позволяет держать frontend и backend в одном проекте, ускоряя разработку. После демо — возможна миграция backend в отдельный сервис.
+**Модульный монолит** на базе Next.js 16 (App Router). Frontend и backend в одном проекте. После демо — возможна миграция backend в отдельный сервис.
 
 ```
 ┌──────────────────────────────────────────────────────────┐
 │                      КЛИЕНТ (Браузер)                    │
 │  ┌────────────┐  ┌──────────┐  ┌──────────────────────┐  │
 │  │ Map View   │  │ Search   │  │ Business Dashboard   │  │
-│  │ (Mapbox)   │  │ (AI)     │  │ (Charts)             │  │
+│  │ (Mapbox)   │  │ (AI)     │  │ (Recharts)           │  │
 │  └─────┬──────┘  └────┬─────┘  └──────────┬───────────┘  │
 │        │              │                    │              │
 │        └──────────────┼────────────────────┘              │
@@ -22,12 +22,14 @@
 └───────────────────────┼──────────────────────────────────┘
                         │
 ┌───────────────────────┼──────────────────────────────────┐
-│                 NEXT.JS SERVER                            │
+│                 NEXT.JS SERVER (App Router)               │
 │                       │                                  │
 │  ┌────────────────────▼─────────────────────────┐        │
 │  │              API ROUTES (/api/*)              │        │
 │  │  ┌──────────┐ ┌──────────┐ ┌──────────────┐  │        │
 │  │  │ /venues  │ │ /search  │ │ /dashboard   │  │        │
+│  │  │ /categ.  │ │          │ │   /:venueId  │  │        │
+│  │  │ /heatmap │ │          │ │              │  │        │
 │  │  └────┬─────┘ └────┬─────┘ └──────┬───────┘  │        │
 │  └───────┼────────────┼──────────────┼───────────┘        │
 │          │            │              │                    │
@@ -35,240 +37,202 @@
 │  │            SERVICE LAYER                       │        │
 │  │  ┌──────────────┐  ┌──────────────────────┐   │        │
 │  │  │ VenueService │  │ AIService            │   │        │
-│  │  │              │  │ (Gemini Provider)    │   │        │
+│  │  │  getAll()    │  │  semanticSearch()    │   │        │
+│  │  │  getById()   │  │  generateActionPlan()│   │        │
+│  │  │  getByBounds │  │  groupComplaints()   │   │        │
 │  │  └──────┬───────┘  └──────────┬───────────┘   │        │
 │  │         │                     │                │        │
 │  │  ┌──────▼───────┐  ┌─────────▼────────────┐   │        │
 │  │  │ ScoreService │  │ AnalyticsService     │   │        │
+│  │  │  calculate() │  │  getDashboardData()  │   │        │
+│  │  │  getHistory()│  │                      │   │        │
+│  │  │  refresh()   │  │                      │   │        │
 │  │  └──────┬───────┘  └──────────┬───────────┘   │        │
 │  └─────────┼─────────────────────┼────────────────┘        │
 │            │                     │                        │
 │  ┌─────────▼─────────────────────▼────────────────┐        │
-│  │              DATA LAYER (Prisma ORM)            │        │
+│  │              DATA LAYER (Prisma 6 ORM)         │        │
 │  └─────────────────────┬──────────────────────────┘        │
 └────────────────────────┼─────────────────────────────────┘
                          │
               ┌──────────▼──────────┐
-              │  PostgreSQL + PostGIS│
-              │  (Neon Serverless)   │
+              │    PostgreSQL       │
+              │  7 моделей (Prisma) │
               └─────────────────────┘
 ```
 
 ---
 
-## 2. Структура проекта
+## 2. Структура проекта (актуальная)
 
 ```
 livecity/
-├── .github/
-│   └── workflows/
-│       └── ci.yml                 # GitHub Actions: lint + test + build
-│
+├── .github/workflows/ci.yml      # 3 jobs: lint+typecheck, tests, build
 ├── prisma/
-│   ├── schema.prisma              # Схема базы данных
-│   ├── migrations/                # Миграции
-│   └── seed.ts                    # Seed-данные (50-100 заведений)
-│
-├── public/
-│   ├── images/                    # Статичные изображения
-│   └── favicon.ico
-│
+│   ├── schema.prisma              # 7 моделей (без PostGIS extensions)
+│   └── seed.ts                    # 70 заведений Алматы, 6 категорий, 12 тегов
 ├── src/
-│   ├── app/                       # Next.js App Router
-│   │   ├── layout.tsx             # Корневой layout
-│   │   ├── page.tsx               # Главная страница (карта)
-│   │   ├── dashboard/
-│   │   │   └── page.tsx           # Бизнес-дашборд
-│   │   └── api/                   # API Routes
-│   │       ├── venues/
-│   │       │   ├── route.ts       # GET /api/venues
-│   │       │   └── [id]/
-│   │       │       └── route.ts   # GET /api/venues/:id
-│   │       ├── search/
-│   │       │   └── route.ts       # POST /api/search
-│   │       ├── heatmap/
-│   │       │   └── route.ts       # GET /api/heatmap
-│   │       └── dashboard/
-│   │           └── route.ts       # GET /api/dashboard/:venueId
-│   │
-│   ├── components/                # React-компоненты
-│   │   ├── map/
-│   │   │   ├── MapView.tsx        # Основная карта
-│   │   │   ├── VenueMarker.tsx    # Маркер заведения
-│   │   │   ├── HeatmapLayer.tsx   # Тепловой слой
-│   │   │   └── MapControls.tsx    # Контролы карты
-│   │   ├── search/
-│   │   │   ├── SearchBar.tsx      # Строка поиска
-│   │   │   └── SearchResults.tsx  # Результаты поиска
-│   │   ├── venue/
-│   │   │   ├── VenueCard.tsx      # Карточка заведения
-│   │   │   ├── LiveScoreBadge.tsx # Бейдж Live Score
-│   │   │   └── VenueDetails.tsx   # Детальная панель
-│   │   ├── dashboard/
-│   │   │   ├── ScoreChart.tsx     # График Live Score
-│   │   │   ├── ComplaintsList.tsx # Список жалоб
-│   │   │   └── ActionPlan.tsx     # AI-рекомендации
-│   │   └── ui/                    # shadcn/ui компоненты
-│   │
-│   ├── services/                  # Бизнес-логика
-│   │   ├── venue.service.ts       # CRUD заведений + гео-запросы
-│   │   ├── score.service.ts       # Расчёт Live Score
-│   │   ├── ai.service.ts          # Обёртка над Gemini API
-│   │   └── analytics.service.ts   # Аналитика для дашборда
-│   │
-│   ├── lib/                       # Утилиты
-│   │   ├── prisma.ts              # Prisma client singleton
-│   │   ├── gemini.ts              # Gemini AI client
-│   │   └── mapbox.ts              # Mapbox конфигурация
-│   │
-│   └── types/                     # TypeScript типы
-│       ├── venue.ts
-│       ├── search.ts
-│       └── dashboard.ts
-│
-├── tests/                         # Тесты
-│   ├── services/
-│   └── api/
-│
-├── .env.example                   # Пример переменных окружения
-├── .gitignore
-├── next.config.js
-├── tailwind.config.ts
+│   ├── app/
+│   │   ├── layout.tsx             # Root layout (lang=ru, OG-теги)
+│   │   ├── page.tsx               # Главная: карта + поиск + venue panel
+│   │   ├── dashboard/page.tsx     # Бизнес-дашборд (skeleton, error state)
+│   │   └── api/                   # 6 REST endpoints
+│   │       ├── venues/route.ts           # GET /api/venues
+│   │       ├── venues/[id]/route.ts      # GET /api/venues/:id
+│   │       ├── categories/route.ts       # GET /api/categories
+│   │       ├── heatmap/route.ts          # GET /api/heatmap
+│   │       ├── search/route.ts           # POST /api/search
+│   │       └── dashboard/[venueId]/route.ts  # GET /api/dashboard/:venueId
+│   ├── components/                # 12 компонентов
+│   │   ├── map/                   # MapView, VenueMarker, HeatmapLayer, MapControls
+│   │   ├── search/                # SearchBar, SearchResults
+│   │   ├── venue/                 # VenueCard, VenueDetails
+│   │   ├── dashboard/             # ScoreChart, ComplaintsList, ActionPlan, DistrictComparison
+│   │   ├── layout/Header.tsx
+│   │   └── ui/LiveScoreBadge.tsx
+│   ├── services/                  # 4 сервиса
+│   │   ├── venue.service.ts
+│   │   ├── score.service.ts
+│   │   ├── ai.service.ts
+│   │   └── analytics.service.ts
+│   ├── lib/                       # prisma.ts, gemini.ts, env.ts
+│   ├── types/                     # venue.ts, search.ts, dashboard.ts
+│   └── __tests__/                 # 37 Vitest тестов
+├── vitest.config.ts
 ├── tsconfig.json
-├── package.json
-└── README.md
+├── .prettierrc
+└── package.json
 ```
 
 ---
 
 ## 3. Ключевые модули
 
-### 3.1. Map Module (Карта)
+### 3.1. Map Module
 
-**Ответственность:** Отрисовка интерактивной карты, маркеров, heatmap.
+**Компоненты:** `MapView`, `VenueMarker`, `HeatmapLayer`, `MapControls`
 
-```
-MapView (контейнер)
-├── Mapbox GL JS (рендер карты)
-├── VenueMarker[] (маркеры с Live Score)
-├── HeatmapLayer (тепловой слой, toggle)
-└── MapControls (zoom, geolocation, layer switch)
-```
+- MapView: `react-map-gl/mapbox`, стиль `dark-v11`, dynamic import (SSR disabled)
+- VenueMarker: цвет-код — green (≥8), amber (≥5), gray (<5)
+- HeatmapLayer: GeoJSON Source + нативный heatmap layer Mapbox
+- MapControls: кнопки heatmap toggle, geolocation, zoom ±
 
-**Данные:**
-- Загрузка заведений: `GET /api/venues?bounds={bbox}&limit=100`
-- Heatmap: `GET /api/heatmap?bounds={bbox}`
+### 3.2. Search Module
 
-### 3.2. Search Module (AI-поиск)
-
-**Ответственность:** Обработка семантических запросов через Gemini.
+**Компоненты:** `SearchBar`, `SearchResults`
 
 ```
-Поток данных:
-1. User input → SearchBar
-2. POST /api/search { query: "тихое кафе", location: {lat, lng} }
-3. API → AIService.semanticSearch(query, venues)
-4. AIService → Gemini API (prompt + venue context)
-5. Gemini → ranked venue IDs + explanations
-6. API → enriched venues (DB lookup)
-7. Frontend → SearchResults + map markers highlight
+User input → POST /api/search { query, limit }
+  → VenueService.getAll() (загрузка контекста)
+  → AIService.semanticSearch(query, venues)
+    → Gemini 2.0 Flash (prompt + venues JSON)
+    → JSON: { interpretation, results: [{ venueId, relevance, reason }] }
+  → Enrichment: venue details из БД
+  → Response: { results: [{ venue, relevance, reason }], interpretation }
 ```
 
-### 3.3. Score Module (Live Score)
+**Fallback:** При ошибке Gemini — текстовый поиск по названию/категории/тегам.
 
-**Ответственность:** Расчёт и кеширование рейтинга.
+### 3.3. Score Module
 
-```
-ScoreService.calculateLiveScore(venueId):
-  socialSignals = getSocialMentions(venueId, last7days)    // вес 0.4
-  sentiment     = getAverageSentiment(venueId, last7days)  // вес 0.3
-  activity      = getCheckInActivity(venueId, last7days)   // вес 0.2
-  timeModifier  = getTimeOfDayModifier(now)                // вес 0.1
-
-  score = (socialSignals * 0.4)
-        + (sentiment * 0.3)
-        + (activity * 0.2)
-        + (timeModifier * 0.1)
-
-  return clamp(score, 0, 10)
-```
-
-**Для демо:** Score берётся из seed-данных + лёгкая рандомизация по времени суток.
-
-### 3.4. Dashboard Module (Бизнес-аналитика)
-
-**Ответственность:** Аналитика и AI-рекомендации для бизнеса.
+**Сервис:** `ScoreService`
 
 ```
-GET /api/dashboard/:venueId
-  → scoreHistory (30 дней)
-  → topComplaints (AI-группировка)
-  → actionPlan (3 AI-рекомендации)
-  → districtComparison (среднее по району)
+calculateDemoScore(baseScore):
+  timeMod    = lunch: +0.3, dinner: +0.5, night: -0.4
+  weekendMod = weekend: +0.3
+  jitter     = random(−0.3, +0.3)
+  return clamp(round(baseScore + timeMod + weekendMod + jitter, 1), 0, 10)
+```
+
+Дополнительно: `refreshAllScores`, `getHistory`, `getDistrictAvg`, `getCityAvg`.
+
+### 3.4. Dashboard Module
+
+**Компоненты:** `ScoreChart`, `ComplaintsList`, `ActionPlan`, `DistrictComparison`
+
+```
+AnalyticsService.getDashboardData(venueId):
+  scoreHistory     = ScoreService.getHistory(30 дней)
+  districtAvg      = ScoreService.getDistrictAvg(lat, lng, 2km)
+  cityAvg          = ScoreService.getCityAvg()
+  topComplaints    = AIService.groupComplaints(reviews)        // Gemini
+  actionPlan       = AIService.generateActionPlan(name, ...)   // Gemini
+  → DashboardData
 ```
 
 ---
 
 ## 4. Интеграции
 
-### 4.1. Google Gemini AI
+### 4.1. Google Gemini AI (gemini-2.0-flash)
 
-**Использование:**
-1. **Semantic Search** — ранжирование заведений по контексту запроса
-2. **AI-Consulting** — генерация action plans для бизнеса
-3. **Venue Description** — генерация описаний заведений
+| Метод | Назначение |
+|---|---|
+| `semanticSearch()` | Ранжирование заведений по NL-запросу |
+| `generateActionPlan()` | 3 рекомендации для бизнеса |
+| `groupComplaints()` | Группировка негативных отзывов по темам |
 
-**Абстракция:**
-```typescript
-interface AIProvider {
-  semanticSearch(query: string, venues: Venue[]): Promise<SearchResult[]>
-  generateActionPlan(venueData: VenueAnalytics): Promise<ActionPlan>
-  generateDescription(venue: Venue): Promise<string>
-}
-```
+Каждый метод имеет catch-блок с fallback-данными.
 
-### 4.2. Mapbox
+### 4.2. Mapbox GL JS
 
-**Использование:**
-- Рендер карты
-- Heatmap-слой
-- Геокодинг (поиск по адресу)
-- Кластеризация маркеров
+- Стиль: `dark-v11`, обёртка: `react-map-gl/mapbox` v8
+- Heatmap: нативный layer type + GeoJSON source
 
-### 4.3. WhatsApp (Direct Connect)
+### 4.3. WhatsApp
 
-**Реализация:** Простая ссылка `wa.me`, без API-интеграции.
+- `wa.me/{phone}?text={encoded}` в VenueDetails
 
 ---
 
 ## 5. Переменные окружения
 
 ```env
-# Database
 DATABASE_URL=postgresql://user:password@host:5432/livecity
-
-# AI
 GEMINI_API_KEY=your_gemini_api_key
-
-# Maps
 NEXT_PUBLIC_MAPBOX_TOKEN=your_mapbox_token
-
-# App
-NEXT_PUBLIC_DEFAULT_LAT=43.2380
-NEXT_PUBLIC_DEFAULT_LNG=76.9450
-NEXT_PUBLIC_DEFAULT_ZOOM=12
+NEXT_PUBLIC_DEFAULT_LAT=43.2380    # опционально
+NEXT_PUBLIC_DEFAULT_LNG=76.9450    # опционально
+NEXT_PUBLIC_DEFAULT_ZOOM=12        # опционально
 ```
 
 ---
 
-## 6. Эволюция после демо
+## 6. CI/CD
+
+```
+GitHub Actions: .github/workflows/ci.yml
+├── Lint & Typecheck (ESLint + tsc --noEmit)
+├── Tests (Vitest — 37 тестов)
+└── Build (prisma generate + next build)
+
+Triggers: push main/claude/**, PR to main
+```
+
+---
+
+## 7. UX-решения
+
+| Элемент | Desktop | Mobile |
+|---|---|---|
+| VenueDetails | Side panel (right, max-w-sm) | Bottom sheet (max-h-70vh) |
+| SearchResults | Fixed 320px | Full-width |
+| Dashboard | 2-column grid | Single column |
+| Keyboard | Escape закрывает все панели | — |
+| Loading | Map spinner, search skeleton, dashboard skeleton | — |
+| Errors | Toast для venues, message для dashboard | — |
+
+---
+
+## 8. Эволюция после демо
 
 ```
 Demo (сейчас)          →  MVP v1.0              →  Scale
 ─────────────────────────────────────────────────────────
 Монолит Next.js        →  Отдельный API сервис  →  Микросервисы
 Seed-данные            →  Реальные соцсети API  →  ML pipeline
-Neon (serverless)      →  Managed PostgreSQL    →  + Redis + Elastic
+PostgreSQL             →  Managed PostgreSQL    →  + Redis + Elastic
 Vercel                 →  Docker + VPS          →  Kubernetes
 Без авторизации        →  Auth (NextAuth)       →  + OAuth + roles
 Только web             →  + React Native        →  + PWA
