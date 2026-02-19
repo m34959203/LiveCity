@@ -9,9 +9,9 @@ import { MapControls } from "./MapControls";
 import type { VenueListItem } from "@/types/venue";
 
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || "";
-const DEFAULT_LAT = Number(process.env.NEXT_PUBLIC_DEFAULT_LAT) || 43.238;
-const DEFAULT_LNG = Number(process.env.NEXT_PUBLIC_DEFAULT_LNG) || 76.945;
-const DEFAULT_ZOOM = Number(process.env.NEXT_PUBLIC_DEFAULT_ZOOM) || 12;
+const DEFAULT_LAT = Number(process.env.NEXT_PUBLIC_DEFAULT_LAT) || 47.7833;
+const DEFAULT_LNG = Number(process.env.NEXT_PUBLIC_DEFAULT_LNG) || 67.7144;
+const DEFAULT_ZOOM = Number(process.env.NEXT_PUBLIC_DEFAULT_ZOOM) || 13;
 
 interface MapViewProps {
   venues: VenueListItem[];
