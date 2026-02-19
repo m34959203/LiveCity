@@ -59,12 +59,20 @@ export default function InsightsPage() {
               Бесплатный анализ
             </span>
           </div>
-          <Link
-            href="/"
-            className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-400 hover:text-white"
-          >
-            Карта
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/dashboard"
+              className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-400 hover:text-white"
+            >
+              Дашборд
+            </Link>
+            <Link
+              href="/"
+              className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-400 hover:text-white"
+            >
+              Карта
+            </Link>
+          </div>
         </div>
       </header>
 

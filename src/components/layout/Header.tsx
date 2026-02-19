@@ -23,10 +23,16 @@ export function Header() {
           Планировщик
         </Link>
         <Link
-          href="/dashboard"
+          href="/insights"
           className="rounded-lg bg-zinc-900/90 px-3 py-2 text-xs font-medium text-zinc-300 backdrop-blur hover:text-white"
         >
-          Бизнесу
+          AI-анализ
+        </Link>
+        <Link
+          href="/dashboard"
+          className="rounded-lg bg-gradient-to-r from-emerald-600/90 to-cyan-600/90 px-3 py-2 text-xs font-medium text-white backdrop-blur hover:opacity-90"
+        >
+          Владельцам
         </Link>
       </div>
     </header>

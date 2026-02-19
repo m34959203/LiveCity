@@ -8,10 +8,12 @@ export class AnalyticsService {
     const venue = await prisma.venue.findUnique({
       where: { id: venueId },
       include: {
+        category: { select: { name: true } },
         reviews: {
           orderBy: { createdAt: "desc" },
           take: 50,
         },
+        _count: { select: { reviews: true } },
       },
     });
 
@@ -54,10 +56,14 @@ export class AnalyticsService {
         id: venue.id,
         name: venue.name,
         liveScore: venue.liveScore,
+        category: venue.category.name,
+        address: venue.address,
+        reviewCount: venue._count.reviews,
       },
       scoreHistory,
       topComplaints,
       actionPlan,
+      generatedAt: new Date().toISOString(),
       districtComparison: {
         venueScore: venue.liveScore,
         districtAvg: district.avg,

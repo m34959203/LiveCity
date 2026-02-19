@@ -30,9 +30,13 @@ export interface DashboardData {
     id: string;
     name: string;
     liveScore: number;
+    category: string;
+    address: string;
+    reviewCount: number;
   };
   scoreHistory: ScoreHistoryPoint[];
   topComplaints: Complaint[];
   actionPlan: ActionPlanItem[];
   districtComparison: DistrictComparison;
+  generatedAt: string;
 }

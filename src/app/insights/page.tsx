@@ -36,12 +36,20 @@ export default function InsightsListPage() {
             <span className="text-zinc-600">/</span>
             <span className="text-sm text-zinc-400">Инсайты для бизнеса</span>
           </div>
-          <Link
-            href="/"
-            className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-400 hover:text-white"
-          >
-            Карта
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/dashboard"
+              className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-400 hover:text-white"
+            >
+              Дашборд
+            </Link>
+            <Link
+              href="/"
+              className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-400 hover:text-white"
+            >
+              Карта
+            </Link>
+          </div>
         </div>
       </header>
 

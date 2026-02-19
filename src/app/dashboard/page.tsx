@@ -42,14 +42,16 @@ interface VenueOption {
 function DashboardSkeleton() {
   return (
     <div className="animate-pulse">
-      <div className="mb-8 flex items-center gap-4">
-        <div className="h-14 w-14 rounded-full bg-zinc-800" />
-        <div>
-          <div className="mb-2 h-6 w-48 rounded bg-zinc-800" />
-          <div className="h-4 w-24 rounded bg-zinc-800" />
+      <div className="mb-6 rounded-xl bg-zinc-900 p-6">
+        <div className="flex items-center gap-4">
+          <div className="h-16 w-16 rounded-full bg-zinc-800" />
+          <div>
+            <div className="mb-2 h-7 w-56 rounded bg-zinc-800" />
+            <div className="h-4 w-36 rounded bg-zinc-800" />
+          </div>
         </div>
       </div>
-      <div className="grid gap-6 md:grid-cols-2">
+      <div className="grid gap-4 sm:gap-6 md:grid-cols-2">
         <div className="h-72 rounded-xl bg-zinc-900 md:col-span-2" />
         <div className="h-48 rounded-xl bg-zinc-900" />
         <div className="h-48 rounded-xl bg-zinc-900" />
@@ -63,7 +65,13 @@ function DashboardSkeleton() {
 
 export default function DashboardPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-zinc-950"><DashboardSkeleton /></div>}>
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-zinc-950 px-4 py-8 sm:px-6">
+          <DashboardSkeleton />
+        </div>
+      }
+    >
       <DashboardContent />
     </Suspense>
   );
@@ -154,11 +162,21 @@ function DashboardContent() {
     [router],
   );
 
+  const formatDate = (iso: string) => {
+    return new Date(iso).toLocaleDateString("ru-RU", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
       {/* Header */}
       <header className="border-b border-zinc-800 px-4 py-4 sm:px-6">
-        <div className="flex items-center justify-between">
+        <div className="mx-auto flex max-w-5xl items-center justify-between">
           <div className="flex items-center gap-3">
             <Link href="/" className="flex items-center gap-2">
               <div className="h-6 w-6 rounded-full bg-gradient-to-br from-emerald-400 to-cyan-500" />
@@ -166,15 +184,15 @@ function DashboardContent() {
             </Link>
             <span className="hidden text-zinc-600 sm:inline">/</span>
             <span className="hidden text-sm text-zinc-400 sm:inline">
-              Бизнес-дашборд
+              Панель владельца
             </span>
           </div>
           <div className="flex items-center gap-2">
             <Link
-              href="/planner"
+              href="/insights"
               className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-400 hover:text-white"
             >
-              Планировщик
+              Инсайты
             </Link>
             <Link
               href="/"
@@ -187,7 +205,7 @@ function DashboardContent() {
       </header>
 
       {/* Content */}
-      <main className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-8">
+      <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
         {/* Venue Selector */}
         {venueOptions.length > 1 && (
           <div className="mb-6">
@@ -212,17 +230,72 @@ function DashboardContent() {
 
         {data && !loading && (
           <>
-            {/* Venue Header */}
-            <div className="mb-8 flex items-center gap-4">
-              <LiveScoreBadge score={data.venue.liveScore} size="lg" />
-              <div>
-                <h1 className="text-xl font-bold sm:text-2xl">
-                  {data.venue.name}
-                </h1>
-                <p className="text-sm text-zinc-500">
-                  ID: {venueId.slice(0, 8)}...
-                </p>
+            {/* Report Header Card */}
+            <div className="mb-6 rounded-xl border border-zinc-800 bg-gradient-to-r from-zinc-900 to-zinc-900/50 p-5 sm:p-6">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-4">
+                  <LiveScoreBadge score={data.venue.liveScore} size="lg" />
+                  <div>
+                    <h1 className="text-xl font-bold sm:text-2xl">
+                      {data.venue.name}
+                    </h1>
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-zinc-400">
+                      <span className="rounded-full bg-zinc-800 px-2.5 py-0.5 text-xs">
+                        {data.venue.category}
+                      </span>
+                      <span className="hidden sm:inline">&middot;</span>
+                      <span className="text-xs">{data.venue.address}</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex flex-col items-start gap-1 sm:items-end">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-zinc-500">
+                      {data.venue.reviewCount} отзывов
+                    </span>
+                    <span className="text-zinc-700">&middot;</span>
+                    <span className="text-xs text-zinc-500">
+                      #{data.districtComparison.rank} в районе
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-zinc-600">
+                    Отчёт от {formatDate(data.generatedAt)}
+                  </p>
+                </div>
               </div>
+
+              {/* Quick stats strip */}
+              {pulse && (
+                <div className="mt-4 grid grid-cols-2 gap-3 border-t border-zinc-800 pt-4 sm:grid-cols-4">
+                  <div>
+                    <p className="text-xs text-zinc-500">Live Score</p>
+                    <p className="text-lg font-bold text-white">
+                      {data.venue.liveScore.toFixed(1)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-zinc-500">Упоминаний/нед</p>
+                    <p className="text-lg font-bold text-white">
+                      {pulse.totalMentions}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-zinc-500">Настроение</p>
+                    <p
+                      className={`text-lg font-bold ${pulse.avgSentiment > 0 ? "text-emerald-400" : pulse.avgSentiment < -0.2 ? "text-red-400" : "text-zinc-300"}`}
+                    >
+                      {pulse.avgSentiment > 0 ? "+" : ""}
+                      {(pulse.avgSentiment * 100).toFixed(0)}%
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-zinc-500">Средняя по городу</p>
+                    <p className="text-lg font-bold text-zinc-300">
+                      {data.districtComparison.cityAvg.toFixed(1)}
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Dashboard Grid */}
@@ -250,6 +323,17 @@ function DashboardContent() {
                   <CompetitorInsights data={competitors} />
                 </div>
               )}
+            </div>
+
+            {/* Footer Branding — visible in screenshots */}
+            <div className="mt-8 flex items-center justify-between border-t border-zinc-800 pt-6 text-xs text-zinc-600">
+              <div className="flex items-center gap-2">
+                <div className="h-4 w-4 rounded-full bg-gradient-to-br from-emerald-400 to-cyan-500" />
+                <span>LiveCity AI Analytics</span>
+              </div>
+              <span>
+                Данные на основе реальных отзывов и социальных сигналов
+              </span>
             </div>
           </>
         )}
