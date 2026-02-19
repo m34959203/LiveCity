@@ -21,13 +21,13 @@ import { logger } from "@/lib/logger";
  * Auth: Bearer CRON_SECRET
  */
 
-// --- City configurations (5 KZ cities, Жезказган — priority) ---
+// --- City configurations (5 KZ cities, Алматы — priority) ---
 const CITIES = [
   {
-    name: "Жезказган",
-    lat: 47.7833,
-    lng: 67.7144,
-    radius: 6000,
+    name: "Алматы",
+    lat: 43.2220,
+    lng: 76.8512,
+    radius: 8000,
   },
   {
     name: "Астана",
@@ -36,22 +36,22 @@ const CITIES = [
     radius: 8000,
   },
   {
-    name: "Караганда",
-    lat: 49.8047,
-    lng: 73.1094,
-    radius: 7000,
-  },
-  {
     name: "Шымкент",
     lat: 42.3417,
     lng: 69.5967,
     radius: 7000,
   },
   {
-    name: "Алматы",
-    lat: 43.238,
-    lng: 76.945,
-    radius: 8000,
+    name: "Караганда",
+    lat: 49.8047,
+    lng: 73.1094,
+    radius: 7000,
+  },
+  {
+    name: "Жезказган",
+    lat: 47.7833,
+    lng: 67.7144,
+    radius: 6000,
   },
 ];
 

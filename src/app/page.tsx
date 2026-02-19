@@ -69,6 +69,8 @@ export default function Home() {
   const handleSearch = useCallback(async (query: string) => {
     setSearchLoading(true);
     setShowSearchResults(true);
+    setSearchResults([]);
+    setSearchInterpretation("");
     try {
       const res = await fetch("/api/search", {
         method: "POST",

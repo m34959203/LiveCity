@@ -4,9 +4,10 @@ const envSchema = z.object({
   DATABASE_URL: z.string().url("DATABASE_URL must be a valid URL"),
   GEMINI_API_KEY: z.string().min(1, "GEMINI_API_KEY is required"),
   NEXT_PUBLIC_MAPBOX_TOKEN: z.string().min(1, "MAPBOX_TOKEN is required"),
-  NEXT_PUBLIC_DEFAULT_LAT: z.coerce.number().default(47.7833),
-  NEXT_PUBLIC_DEFAULT_LNG: z.coerce.number().default(67.7144),
+  NEXT_PUBLIC_DEFAULT_LAT: z.coerce.number().default(43.2220),
+  NEXT_PUBLIC_DEFAULT_LNG: z.coerce.number().default(76.8512),
   NEXT_PUBLIC_DEFAULT_ZOOM: z.coerce.number().default(13),
+  DEFAULT_CITY: z.string().default("Алматы"),
 });
 
 export type Env = z.infer<typeof envSchema>;

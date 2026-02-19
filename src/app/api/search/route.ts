@@ -30,8 +30,8 @@ const TWOGIS_CATEGORY_MAP: [RegExp, string][] = [
   [/развлеч|кинотеатр|боулинг/i, "entertainment"],
 ];
 
-// Default city for Lazy Discovery (Жезказган)
-const DEFAULT_CITY = "Жезказган";
+// Default city for Lazy Discovery (configurable via env)
+const DEFAULT_CITY = process.env.DEFAULT_CITY || "Алматы";
 
 export async function POST(request: NextRequest) {
   const ip = getRateLimitKey(request);
@@ -95,6 +95,7 @@ export async function POST(request: NextRequest) {
         query.trim(),
         DEFAULT_CITY,
         5,
+        30_000, // 30s timeout for interactive search (vs 120s for cron)
       );
 
       if (twoGisResults.length > 0) {
