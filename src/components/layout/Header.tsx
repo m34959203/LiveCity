@@ -36,13 +36,13 @@ export function Header({ city, onCityChange }: HeaderProps) {
       <div className="absolute right-3 top-4 z-30 flex items-center gap-1.5 sm:right-4">
         <Link
           href="/planner"
-          className="rounded-lg bg-zinc-900/90 px-3 py-2 text-xs font-medium text-zinc-300 backdrop-blur hover:text-white"
+          className="hidden rounded-lg bg-zinc-900/90 px-3 py-2 text-xs font-medium text-zinc-300 backdrop-blur hover:text-white lg:inline-flex"
         >
           Планировщик
         </Link>
         <Link
           href="/insights"
-          className="rounded-lg bg-zinc-900/90 px-3 py-2 text-xs font-medium text-zinc-300 backdrop-blur hover:text-white"
+          className="hidden rounded-lg bg-zinc-900/90 px-3 py-2 text-xs font-medium text-zinc-300 backdrop-blur hover:text-white lg:inline-flex"
         >
           AI-анализ
         </Link>
