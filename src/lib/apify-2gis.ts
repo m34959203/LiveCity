@@ -6,9 +6,10 @@ import { logger } from "./logger";
 // Actor: m_mamaev/2gis-places-scraper (ID via APIFY_2GIS_PLACES_ACTOR)
 //
 // Input schema (discovered from build):
-//   query: string[]     — Search queries (e.g. ["рестораны"])
-//   location: string    — City/location name (e.g. "Алматы")
-//   maxItems: number    — Max results to fetch
+//   query: string[]        — Search queries (e.g. ["рестораны"])
+//   locationQuery: string  — City/location name (e.g. "Алматы")
+//   domain: string         — 2GIS domain (e.g. "2gis.kz" for Kazakhstan)
+//   maxItems: number       — Max results to fetch
 //
 // Used by:
 //   - venue-scout CRON (City Radar) — bulk discovery
@@ -109,17 +110,19 @@ export class Apify2GisClient {
     this.logSchemaOnce().catch(() => {});
 
     try {
-      // m_mamaev/2gis-places-scraper input format:
-      //   query: array of search strings
-      //   location: city name (as separate field, NOT in query)
-      //   maxItems: max results
+      // m_mamaev/2gis-places-scraper input format (from inputSchema):
+      //   query: string[]       — search terms
+      //   locationQuery: string — city name
+      //   domain: string        — country domain (2gis.kz for Kazakhstan)
+      //   maxItems: integer     — max results per query
       const input = {
         query: [query],
-        location: city,
+        locationQuery: city,
+        domain: "2gis.kz",
         maxItems,
       };
 
-      logger.info(`2GIS Apify: search query=["${query}"] location="${city}" maxItems=${maxItems}`, {
+      logger.info(`2GIS Apify: search query=["${query}"] locationQuery="${city}" domain=2gis.kz maxItems=${maxItems}`, {
         endpoint: "Apify2GisClient.searchPlaces",
       });
 
