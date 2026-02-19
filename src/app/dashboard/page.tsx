@@ -1,13 +1,37 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { LiveScoreBadge } from "@/components/ui/LiveScoreBadge";
 import { ScoreChart } from "@/components/dashboard/ScoreChart";
 import { ComplaintsList } from "@/components/dashboard/ComplaintsList";
 import { ActionPlan } from "@/components/dashboard/ActionPlan";
 import { DistrictComparison } from "@/components/dashboard/DistrictComparison";
+import { SocialPulse } from "@/components/dashboard/SocialPulse";
+import { CompetitorInsights } from "@/components/dashboard/CompetitorInsights";
 import type { DashboardData } from "@/types/dashboard";
+
+interface SocialPulseData {
+  totalMentions: number;
+  avgSentiment: number;
+  trend: "rising" | "stable" | "declining";
+  sources: { source: string; mentions: number; sentiment: number }[];
+}
+
+interface CompetitorData {
+  competitors: {
+    id: string;
+    name: string;
+    liveScore: number;
+    address: string;
+    distance: number;
+  }[];
+  strengths: string[];
+  weaknesses: string[];
+  opportunities: string[];
+  summary: string;
+}
 
 function DashboardSkeleton() {
   return (
@@ -23,6 +47,8 @@ function DashboardSkeleton() {
         <div className="h-72 rounded-xl bg-zinc-900 md:col-span-2" />
         <div className="h-48 rounded-xl bg-zinc-900" />
         <div className="h-48 rounded-xl bg-zinc-900" />
+        <div className="h-48 rounded-xl bg-zinc-900" />
+        <div className="h-48 rounded-xl bg-zinc-900" />
         <div className="h-56 rounded-xl bg-zinc-900 md:col-span-2" />
       </div>
     </div>
@@ -30,28 +56,56 @@ function DashboardSkeleton() {
 }
 
 export default function DashboardPage() {
+  const searchParams = useSearchParams();
   const [data, setData] = useState<DashboardData | null>(null);
+  const [pulse, setPulse] = useState<SocialPulseData | null>(null);
+  const [competitors, setCompetitors] = useState<CompetitorData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [venueId, setVenueId] = useState<string>("");
 
-  // On mount: load first venue for demo
   useEffect(() => {
-    fetch("/api/venues?limit=1")
-      .then((r) => r.json())
-      .then((res) => {
-        const id = res.data?.[0]?.id;
-        if (id) {
-          setVenueId(id);
-          return fetch(`/api/dashboard/${id}`);
+    const qsVenueId = searchParams.get("venueId");
+
+    const loadDashboard = async (id: string) => {
+      setVenueId(id);
+
+      // Load all data in parallel
+      const [dashRes, pulseRes, compRes] = await Promise.all([
+        fetch(`/api/dashboard/${id}`).then((r) => r.json()),
+        fetch(`/api/venues/${id}/pulse`).then((r) => r.json()),
+        fetch(`/api/dashboard/${id}/competitors`).then((r) => r.json()),
+      ]);
+
+      if (dashRes.data) setData(dashRes.data);
+      if (pulseRes.data) setPulse(pulseRes.data);
+      if (compRes.data) setCompetitors(compRes.data);
+    };
+
+    const init = async () => {
+      try {
+        if (qsVenueId) {
+          await loadDashboard(qsVenueId);
+        } else {
+          // Load first venue for demo
+          const res = await fetch("/api/venues?limit=1");
+          const json = await res.json();
+          const id = json.data?.[0]?.id;
+          if (id) {
+            await loadDashboard(id);
+          } else {
+            throw new Error("No venues");
+          }
         }
-        throw new Error("No venues");
-      })
-      .then((r) => r!.json())
-      .then((res) => setData(res.data))
-      .catch((e: Error) => setError(e.message || "Ошибка загрузки"))
-      .finally(() => setLoading(false));
-  }, []);
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : "Ошибка загрузки");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    init();
+  }, [searchParams]);
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
@@ -68,12 +122,20 @@ export default function DashboardPage() {
               Бизнес-дашборд
             </span>
           </div>
-          <Link
-            href="/"
-            className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-400 hover:text-white"
-          >
-            Карта
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/planner"
+              className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-400 hover:text-white"
+            >
+              Планировщик
+            </Link>
+            <Link
+              href="/"
+              className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-400 hover:text-white"
+            >
+              Карта
+            </Link>
+          </div>
         </div>
       </header>
 
@@ -98,14 +160,29 @@ export default function DashboardPage() {
 
             {/* Dashboard Grid */}
             <div className="grid gap-4 sm:gap-6 md:grid-cols-2">
+              {/* Score chart — full width */}
               <div className="md:col-span-2">
                 <ScoreChart data={data.scoreHistory} />
               </div>
-              <ComplaintsList complaints={data.topComplaints} />
+
+              {/* Social Pulse */}
+              {pulse && <SocialPulse data={pulse} />}
+
+              {/* District Comparison */}
               <DistrictComparison data={data.districtComparison} />
-              <div className="md:col-span-2">
-                <ActionPlan actions={data.actionPlan} />
-              </div>
+
+              {/* Complaints */}
+              <ComplaintsList complaints={data.topComplaints} />
+
+              {/* Action Plan */}
+              <ActionPlan actions={data.actionPlan} />
+
+              {/* Competitor Insights — full width */}
+              {competitors && (
+                <div className="md:col-span-2">
+                  <CompetitorInsights data={competitors} />
+                </div>
+              )}
             </div>
           </>
         )}
@@ -113,7 +190,12 @@ export default function DashboardPage() {
         {!data && !loading && (
           <div className="flex h-64 flex-col items-center justify-center gap-3 text-zinc-500">
             <div className="h-12 w-12 rounded-full bg-zinc-800 p-3 text-zinc-600">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.5}
+              >
                 <path d="M12 9v3m0 3h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" />
               </svg>
             </div>

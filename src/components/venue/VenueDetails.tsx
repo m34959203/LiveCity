@@ -9,32 +9,46 @@ interface VenueDetailsProps {
   onClose: () => void;
 }
 
+interface SocialPulse {
+  totalMentions: number;
+  avgSentiment: number;
+  trend: "rising" | "stable" | "declining";
+}
+
 type State = {
   venue: VenueDetail | null;
+  pulse: SocialPulse | null;
   loading: boolean;
 };
 
 type Action =
   | { type: "FETCH_START" }
-  | { type: "FETCH_OK"; venue: VenueDetail }
+  | { type: "FETCH_OK"; venue: VenueDetail; pulse: SocialPulse | null }
   | { type: "FETCH_ERR" }
   | { type: "RESET" };
 
 function reducer(_state: State, action: Action): State {
   switch (action.type) {
     case "FETCH_START":
-      return { venue: null, loading: true };
+      return { venue: null, pulse: null, loading: true };
     case "FETCH_OK":
-      return { venue: action.venue, loading: false };
+      return { venue: action.venue, pulse: action.pulse, loading: false };
     case "FETCH_ERR":
-      return { venue: null, loading: false };
+      return { venue: null, pulse: null, loading: false };
     case "RESET":
-      return { venue: null, loading: false };
+      return { venue: null, pulse: null, loading: false };
   }
 }
 
+const trendLabel = { rising: "Растёт", stable: "Стабильно", declining: "Падает" };
+const trendColor = { rising: "text-emerald-400", stable: "text-zinc-400", declining: "text-red-400" };
+
 export function VenueDetails({ venueId, onClose }: VenueDetailsProps) {
-  const [state, dispatch] = useReducer(reducer, { venue: null, loading: false });
+  const [state, dispatch] = useReducer(reducer, {
+    venue: null,
+    pulse: null,
+    loading: false,
+  });
 
   useEffect(() => {
     if (!venueId) {
@@ -45,9 +59,22 @@ export function VenueDetails({ venueId, onClose }: VenueDetailsProps) {
     const controller = new AbortController();
     dispatch({ type: "FETCH_START" });
 
-    fetch(`/api/venues/${venueId}`, { signal: controller.signal })
-      .then((r) => r.json())
-      .then((res) => dispatch({ type: "FETCH_OK", venue: res.data }))
+    // Fetch venue details and social pulse in parallel
+    Promise.all([
+      fetch(`/api/venues/${venueId}`, { signal: controller.signal }).then((r) =>
+        r.json(),
+      ),
+      fetch(`/api/venues/${venueId}/pulse`, { signal: controller.signal }).then(
+        (r) => r.json(),
+      ),
+    ])
+      .then(([venueRes, pulseRes]) => {
+        dispatch({
+          type: "FETCH_OK",
+          venue: venueRes.data,
+          pulse: pulseRes.data ?? null,
+        });
+      })
       .catch((err) => {
         if (err.name !== "AbortError") {
           dispatch({ type: "FETCH_ERR" });
@@ -57,7 +84,7 @@ export function VenueDetails({ venueId, onClose }: VenueDetailsProps) {
     return () => controller.abort();
   }, [venueId]);
 
-  const { venue, loading } = state;
+  const { venue, pulse, loading } = state;
 
   if (!venueId) return null;
 
@@ -99,6 +126,37 @@ export function VenueDetails({ venueId, onClose }: VenueDetailsProps) {
               </span>
             </div>
           </div>
+
+          {/* Social Pulse — the "Truth Filter" indicator */}
+          {pulse && (
+            <div className="mb-4 rounded-lg border border-zinc-800 bg-zinc-900 p-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-zinc-400">
+                  Социальный пульс
+                </span>
+                <span className={`text-xs font-medium ${trendColor[pulse.trend]}`}>
+                  {trendLabel[pulse.trend]}
+                </span>
+              </div>
+              <div className="mt-2 flex items-center gap-4">
+                <div>
+                  <p className="text-lg font-bold text-white">
+                    {pulse.totalMentions}
+                  </p>
+                  <p className="text-[10px] text-zinc-500">упоминаний</p>
+                </div>
+                <div>
+                  <p
+                    className={`text-lg font-bold ${pulse.avgSentiment > 0 ? "text-emerald-400" : pulse.avgSentiment < -0.2 ? "text-red-400" : "text-zinc-300"}`}
+                  >
+                    {pulse.avgSentiment > 0 ? "+" : ""}
+                    {(pulse.avgSentiment * 100).toFixed(0)}%
+                  </p>
+                  <p className="text-[10px] text-zinc-500">настроение</p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Address */}
           <p className="mb-4 text-sm text-zinc-400">{venue.address}</p>

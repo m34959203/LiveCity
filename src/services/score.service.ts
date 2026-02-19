@@ -1,49 +1,47 @@
 import { prisma } from "@/lib/prisma";
+import { SocialSignalService } from "./social-signal.service";
+import { logger } from "@/lib/logger";
 
 export class ScoreService {
   /**
-   * Calculate Live Score for a venue.
-   * Demo: base score from DB + time-of-day modifier + slight randomization.
-   * Production: would pull real social signals, sentiment, check-ins.
+   * Calculate Live Score using REAL social signals.
+   * The "Truth Filter" — score that can't be faked.
    */
-  static calculateDemoScore(baseScore: number): number {
-    const hour = new Date().getHours();
-
-    // Time-of-day modifier: busier in evenings, quieter at night
-    let timeMod = 0;
-    if (hour >= 11 && hour < 14) timeMod = 0.3; // lunch
-    else if (hour >= 18 && hour < 22) timeMod = 0.5; // dinner peak
-    else if (hour >= 22 || hour < 6) timeMod = -0.4; // late night
-    else timeMod = 0;
-
-    // Day-of-week: weekends busier
-    const day = new Date().getDay();
-    const weekendMod = day === 0 || day === 6 ? 0.3 : 0;
-
-    // Small random jitter
-    const jitter = (Math.random() - 0.5) * 0.6;
-
-    const score = baseScore + timeMod + weekendMod + jitter;
-    return Math.round(Math.max(0, Math.min(10, score)) * 10) / 10;
+  static async calculateLiveScore(venueId: string): Promise<number> {
+    return SocialSignalService.calculateLiveScore(venueId);
   }
 
   /**
-   * Refresh live scores for all active venues (batch).
+   * Refresh live scores for all active venues.
+   * 1. Collect fresh social signals
+   * 2. Recalculate scores
+   * 3. Save to history
    */
-  static async refreshAllScores() {
+  static async refreshAllScores(): Promise<number> {
+    await SocialSignalService.collectAllSignals();
+
     const venues = await prisma.venue.findMany({
       where: { isActive: true },
-      select: { id: true, liveScore: true },
+      select: { id: true },
     });
 
-    const updates = venues.map((v) =>
-      prisma.venue.update({
-        where: { id: v.id },
-        data: { liveScore: this.calculateDemoScore(v.liveScore) },
-      }),
-    );
+    for (const v of venues) {
+      const newScore = await this.calculateLiveScore(v.id);
 
-    await prisma.$transaction(updates);
+      await prisma.venue.update({
+        where: { id: v.id },
+        data: { liveScore: newScore },
+      });
+
+      await prisma.scoreHistory.create({
+        data: { venueId: v.id, score: newScore },
+      });
+    }
+
+    logger.info("Scores refreshed from social signals", {
+      endpoint: "ScoreService.refreshAllScores",
+    });
+
     return venues.length;
   }
 
@@ -76,7 +74,6 @@ export class ScoreService {
     longitude: number,
     radiusKm = 2,
   ) {
-    // Approximate: 1 degree lat ≈ 111km
     const latDelta = radiusKm / 111;
     const lngDelta = radiusKm / (111 * Math.cos((latitude * Math.PI) / 180));
 
