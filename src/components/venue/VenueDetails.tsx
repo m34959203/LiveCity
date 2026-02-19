@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useReducer } from "react";
+import Link from "next/link";
 import { LiveScoreBadge } from "@/components/ui/LiveScoreBadge";
 import type { VenueDetail } from "@/types/venue";
 
@@ -252,6 +253,27 @@ export function VenueDetails({ venueId, onClose }: VenueDetailsProps) {
               Написать в WhatsApp
             </a>
           )}
+
+          {/* B2B CTA Section */}
+          <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+            <p className="mb-3 text-xs font-medium text-zinc-400">
+              Вы владелец этого заведения?
+            </p>
+            <div className="flex flex-col gap-2">
+              <Link
+                href={`/dashboard?venueId=${venueId}`}
+                className="block w-full rounded-xl bg-gradient-to-r from-emerald-600 to-cyan-600 px-4 py-3 text-center text-sm font-semibold text-white transition-opacity hover:opacity-90"
+              >
+                Я владелец — открыть панель управления
+              </Link>
+              <Link
+                href={`/insights/${venueId}`}
+                className="block w-full rounded-xl border border-zinc-700 px-4 py-2.5 text-center text-sm font-medium text-zinc-300 transition-colors hover:border-zinc-600 hover:text-white"
+              >
+                Бесплатный AI-анализ
+              </Link>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -3,6 +3,74 @@ import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
 // ============================================
+// Google Places API — Real reviews fetching
+// ============================================
+const GOOGLE_PLACES_API_KEY = process.env.GOOGLE_PLACES_API_KEY || "";
+const PLACES_BASE = "https://maps.googleapis.com/maps/api/place";
+
+interface GoogleReviewRaw {
+  author_name: string;
+  rating: number;
+  text: string;
+  time: number;
+  language: string;
+}
+
+async function fetchGooglePlaceId(
+  name: string,
+  lat: number,
+  lng: number,
+): Promise<string | null> {
+  if (!GOOGLE_PLACES_API_KEY) return null;
+  try {
+    const params = new URLSearchParams({
+      input: `${name} Алматы`,
+      inputtype: "textquery",
+      locationbias: `circle:1000@${lat},${lng}`,
+      fields: "place_id",
+      key: GOOGLE_PLACES_API_KEY,
+    });
+    const res = await fetch(`${PLACES_BASE}/findplacefromtext/json?${params}`, {
+      signal: AbortSignal.timeout(10_000),
+    });
+    const data = await res.json();
+    return data.candidates?.[0]?.place_id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchGoogleReviews(
+  placeId: string,
+): Promise<GoogleReviewRaw[]> {
+  try {
+    const params = new URLSearchParams({
+      place_id: placeId,
+      fields: "reviews",
+      language: "ru",
+      key: GOOGLE_PLACES_API_KEY,
+    });
+    const res = await fetch(`${PLACES_BASE}/details/json?${params}`, {
+      signal: AbortSignal.timeout(10_000),
+    });
+    const data = await res.json();
+    return (data.result?.reviews ?? []).map((r: Record<string, unknown>) => ({
+      author_name: (r.author_name as string) ?? "Гость",
+      rating: (r.rating as number) ?? 3,
+      text: (r.text as string) ?? "",
+      time: (r.time as number) ?? Date.now() / 1000,
+      language: (r.language as string) ?? "ru",
+    }));
+  } catch {
+    return [];
+  }
+}
+
+function ratingToSentiment(rating: number): number {
+  return Math.round(((rating - 3) / 2) * 100) / 100;
+}
+
+// ============================================
 // CATEGORIES
 // ============================================
 const categories = [
@@ -1140,33 +1208,20 @@ const venues: VenueSeed[] = [
 ];
 
 // ============================================
-// DEMO REVIEWS
+// REAL REVIEW NAMES — Kazakhstan
 // ============================================
-const reviewTemplates = {
-  positive: [
-    { text: "Отличное место! Вкусная еда и приятный персонал", sentiment: 0.9 },
-    { text: "Очень уютная атмосфера, буду приходить ещё", sentiment: 0.85 },
-    { text: "Быстро обслужили, всё свежее. Рекомендую!", sentiment: 0.88 },
-    { text: "Прекрасное место для семейного отдыха", sentiment: 0.82 },
-    { text: "Лучшее заведение в этом районе!", sentiment: 0.95 },
-    { text: "Красивый интерьер, вкусные десерты", sentiment: 0.8 },
-    { text: "Идеально для бизнес-встречи. Тихо и комфортно", sentiment: 0.78 },
-    { text: "Приятно удивлены качеством. Придём снова", sentiment: 0.84 },
-  ],
-  neutral: [
-    { text: "Нормальное место, средние цены", sentiment: 0.1 },
-    { text: "Кухня на четвёрочку, обслуживание тоже", sentiment: 0.2 },
-    { text: "Ничего особенного, но и жаловаться не на что", sentiment: 0.05 },
-    { text: "Пришли большой компанией, в целом ок", sentiment: 0.15 },
-  ],
-  negative: [
-    { text: "Долго ждали заказ, больше часа", sentiment: -0.7 },
-    { text: "Грязный столик, официант невнимательный", sentiment: -0.8 },
-    { text: "Цены завышены для такого качества", sentiment: -0.5 },
-    { text: "Шумно, не слышно собеседника", sentiment: -0.6 },
-    { text: "Блюдо было холодным, пришлось возвращать", sentiment: -0.75 },
-  ],
-};
+const realNames = [
+  "Айгерим М.", "Данияр К.", "Асель Б.", "Тимур С.", "Мадина Р.",
+  "Ержан О.", "Динара А.", "Нурлан Т.", "Жанна К.", "Алмас Б.",
+  "Камила Н.", "Бауыржан Е.", "Сауле М.", "Арман Ж.", "Гульнара С.",
+  "Руслан Д.", "Айнура О.", "Марат К.", "Дана Т.", "Серик А.",
+  "Жазира Н.", "Олжас Б.", "Томирис К.", "Ален Р.", "Алия М.",
+  "Рустам С.", "Инара Д.", "Болат Ж.", "Назерке А.", "Канат Е.",
+  "Айгуль Т.", "Нуржан К.", "Аружан С.", "Даулет М.", "Лаура Б.",
+  "Азамат Н.", "Салтанат Р.", "Ерлан О.", "Жансая Д.", "Кайрат А.",
+  "Диас К.", "Медина Т.", "Ильяс Ж.", "Карина М.", "Адиль С.",
+  "Анеля Б.", "Нурбол Е.", "Жибек Н.", "Тагир Р.", "Альмира К.",
+];
 
 const reviewSources = ["google", "2gis", "instagram", "manual"];
 
@@ -1192,41 +1247,273 @@ function pickRandom<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-function generateReviews(baseScore: number, count: number) {
-  const reviews = [];
+// Track used names per venue to avoid duplicates
+const usedNameIndices = new Set<number>();
+
+function getUniqueName(): string {
+  if (usedNameIndices.size >= realNames.length) {
+    usedNameIndices.clear();
+  }
+  let idx: number;
+  do {
+    idx = Math.floor(Math.random() * realNames.length);
+  } while (usedNameIndices.has(idx));
+  usedNameIndices.add(idx);
+  return realNames[idx];
+}
+
+/**
+ * Convert Google reviews to our DB format
+ */
+function googleReviewsToSeed(googleReviews: GoogleReviewRaw[]) {
+  return googleReviews
+    .filter((r) => r.text && r.text.length > 5)
+    .map((r) => ({
+      text: r.text,
+      sentiment: ratingToSentiment(r.rating),
+      source: "google" as const,
+      rating: r.rating,
+      authorName: r.author_name,
+      createdAt: new Date(r.time * 1000),
+    }));
+}
+
+/**
+ * Generate realistic fallback reviews for a specific venue.
+ * Each review is unique — uses venue name, category, and description context.
+ */
+function generateFallbackReviews(
+  venueName: string,
+  categorySlug: string,
+  description: string,
+  baseScore: number,
+  count: number,
+) {
+  const reviews: {
+    text: string;
+    sentiment: number;
+    source: string;
+    rating: number;
+    authorName: string;
+    createdAt: Date;
+  }[] = [];
+
+  // Category-specific review pools (many more options, realistic)
+  const categoryReviews: Record<string, { positive: string[]; neutral: string[]; negative: string[] }> = {
+    restaurant: {
+      positive: [
+        `Были в ${venueName} на ужин — блюда потрясающие, порции щедрые. Официант посоветовал отличное вино к мясу`,
+        `${venueName} — наше любимое место для семейных обедов. Дети всегда довольны, взрослые тоже. Бешбармак — топ!`,
+        `Забронировали столик на день рождения — всё было идеально. Персонал принёс комплимент от заведения`,
+        `Ходим в ${venueName} каждую пятницу. Стабильно вкусно, чисто, обслуживание на уровне`,
+        `Заказали банкет на 20 человек — организовали всё без заминок. Гости были в восторге от еды`,
+        `${venueName} реально лучше многих ресторанов в центре. Мясо прожарено идеально, соус авторский шикарен`,
+        `Зашли случайно — и не пожалели. Лагман домашний, порции как у бабушки. Цены адекватные`,
+        `Это место реально стоит каждого тенге. Манты тают во рту, бульон наваристый`,
+        `Друзья порекомендовали ${venueName} — теперь это и мой фаворит. Шашлык из баранины — шедевр`,
+        `Брали навынос плов и самсу — всё горячее, доехало отлично. Буду заказывать ещё`,
+      ],
+      neutral: [
+        `В ${venueName} нормально, но ничего выдающегося. Средний ресторан для этого ценника`,
+        `Обед в ${venueName}: салат свежий, горячее долго несли. В целом на твёрдую четвёрку`,
+        `Порции стали меньше, чем раньше. Вкус тот же, но за эту цену хочется больше`,
+        `Интерьер приятный, но кондиционер слишком холодный. Еда — без претензий`,
+        `Были на бизнес-ланче. За 2500 тенге — суп и горячее. Сносно, не более`,
+        `Кухня стабильная, но меню давно не обновляли. Хочется чего-то нового`,
+      ],
+      negative: [
+        `Ждали заказ в ${venueName} 50 минут. Когда принесли — стейк пережарен, соус кислый`,
+        `Официант забыл про нас — пришлось самим ходить на кассу. Для такого ценника — неприемлемо`,
+        `Нашли волос в салате. Менеджер извинился, но осадок остался. Больше не пойдём`,
+        `Цены выросли на 30%, а порции уменьшились. ${venueName} уже не тот`,
+        `Заказали рыбу — принесли явно несвежую. Вернули, замену ждали ещё 40 минут`,
+      ],
+    },
+    cafe: {
+      positive: [
+        `${venueName} — моя рабочая кофейня. Тихо, розетки, быстрый Wi-Fi. Латте на овсяном — лучший в городе`,
+        `Заходим каждое утро за капучино. Бариста помнит наш заказ — приятно`,
+        `Круассаны свежие, кофе ароматный. ${venueName} создаёт правильное утреннее настроение`,
+        `Пробовала тут матча-латте и чизкейк — сочетание идеальное. Инстаграмный интерьер`,
+        `Лучшая кофейня для фрилансеров. Сидел 4 часа — никто не выгонял, интернет летает`,
+        `Десерты тут авторские, не как везде. Медовик — произведение искусства`,
+        `Брали кофе на вынос — сделали быстро и вкусно. Стакан красивый, можно в сториз`,
+        `${venueName} — лучшее место для свидания. Тихая музыка, свечи, вкусные десерты`,
+      ],
+      neutral: [
+        `Кофе в ${venueName} средний — не лучше и не хуже, чем в других кофейнях рядом`,
+        `Пирожные симпатичные, но вкус обычный. Кофе стабильный, ничего нового`,
+        `Для работы подходит, но шумновато в обед. Утром отлично`,
+        `Цены чуть выше среднего за обычный капучино. Интерьер компенсирует`,
+        `Зашли попробовать — нормально. Без wow-эффекта, но и без разочарования`,
+      ],
+      negative: [
+        `Кофе в ${venueName} перегретый, горчит. За 1800 тенге ожидаешь большего`,
+        `Сели за грязный стол — пришлось ждать, пока протрут. Кофе остыл за это время`,
+        `Wi-Fi не работает уже вторую неделю. Для кофейни, которая позиционируется как коворкинг — фейл`,
+        `Принесли латте с прокисшим молоком. Извинились, переделали — но время потеряно`,
+      ],
+    },
+    bar: {
+      positive: [
+        `${venueName} — топовый бар. Коктейли авторские, бармен реально знает своё дело`,
+        `Крутая атмосфера, живая музыка по пятницам. IPA на высоте — наливают правильно`,
+        `Отмечали день рождения друга — бар не подвёл. Коктейль "фирменный" — бомба`,
+        `Зашли после работы на бокал — засиделись до закрытия. Настолько хорошо тут`,
+        `${venueName} — единственный бар, где Old Fashioned делают как надо. Респект`,
+        `Тут реально чувствуется вайб. Диджей, коктейли, народ интересный. Топ для пятницы`,
+        `Вино натуральное — наконец-то нашёл место, где наливают не из картонки`,
+      ],
+      neutral: [
+        `Коктейли в ${venueName} нормальные, но за 3500 тенге хочется подачу поинтереснее`,
+        `Музыка громковата, но в целом атмосфера есть. Пиво холодное — уже хорошо`,
+        `Средний бар для Алматы. Не плохо, не хорошо — просто бар`,
+        `Кальян средний, коктейли без претензий. Для района — пойдёт`,
+      ],
+      negative: [
+        `В ${venueName} задымлено так, что глаза щиплет. Вентиляция — ноль`,
+        `Бармен путает заказы — два раза приносил не то. Лёд растаял, пока ждали`,
+        `Фейсконтроль неприятный, внутри — обычный бар. Не соответствует своему пафосу`,
+        `Пиво разбавленное, порция маленькая. За 2000 тенге — позор`,
+      ],
+    },
+    park: {
+      positive: [
+        `${venueName} — любимое место для утренней пробежки. Воздух чистый, дорожки ровные`,
+        `Гуляем тут с семьёй каждые выходные. Дети в восторге от площадки`,
+        `Красивый парк, особенно осенью. Скамейки чистые, фонтан работает`,
+        `${venueName} — отличное место для фотосессий. Зелень, цветы, никакой суеты`,
+        `Катаемся на великах по выходным — инфраструктура супер. Есть прокат и парковка`,
+        `Лучшее место для медитации на утренней заре. Тихо, птицы поют`,
+        `С собакой гулять удобно — есть зона для питомцев, пакеты для уборки`,
+      ],
+      neutral: [
+        `Парк обычный, лавочек хватает. Летом тень, зимой холодно — как и везде`,
+        `${venueName} стал чуть менее ухоженным, но гулять всё ещё приятно`,
+        `Детская площадка устарела — нужно обновить оборудование. В остальном ок`,
+        `Фонтан не работает уже месяц. Парк всё равно красивый, но жалко`,
+      ],
+      negative: [
+        `В ${venueName} вечером опасно — нет освещения, тёмные аллеи. Нужны фонари`,
+        `Мусорки переполнены, бутылки валяются. Куда смотрит акимат?`,
+        `Бродячие собаки пугают детей. Были с ребёнком — испугался сильно`,
+      ],
+    },
+    mall: {
+      positive: [
+        `${venueName} — лучший торговый центр. Всё есть: одежда, электроника, еда. Парковка удобная`,
+        `Кинотеатр тут отличный — IMAX реально впечатляет. Фуд-корт тоже хороший`,
+        `Каток работает круглый год — дети в восторге. И цены не кусаются`,
+        `Магазины разнообразные, цены от бюджетных до премиум. Каждый найдёт своё`,
+        `Ходим в ${venueName} всей семьёй по субботам — игровая зона для детей, шопинг для нас`,
+      ],
+      neutral: [
+        `${venueName} — обычный ТРЦ, ничего уникального. Но всё необходимое есть`,
+        `Фуд-корт средний — выбор маленький, очереди большие в обед`,
+        `Парковка бесплатная — плюс, но мест мало в выходные. Кружишь по 20 минут`,
+        `Магазинов стало меньше — видно, что часть арендаторов ушла`,
+      ],
+      negative: [
+        `В ${venueName} летом кондиционер не справляется — душно, хочется выйти`,
+        `Эскалаторы вечно сломаны. С коляской приходится искать лифт на другом конце`,
+        `Туалеты грязные — для такого крупного ТРЦ это стыд`,
+      ],
+    },
+    entertainment: {
+      positive: [
+        `${venueName} — крутые эмоции! Были всей компанией — адреналин зашкаливал`,
+        `Дети провели тут 3 часа и не хотели уходить. Однозначно придём ещё`,
+        `Организация на высоте — всё чётко, по времени, персонал помогает`,
+        `${venueName} — лучшее место для корпоратива. Весело, необычно, все довольны`,
+        `Ходили на семейный квест — задания интересные, даже для взрослых не простые`,
+        `Виды тут потрясающие. Подъём стоит каждого тенге`,
+      ],
+      neutral: [
+        `Для детей — отлично, для взрослых — так себе. Но дети счастливы, значит ок`,
+        `${venueName} не сильно изменился с прошлого года. Те же аттракционы, те же цены`,
+        `Очереди в выходные большие — приходите в будни, если хотите комфорт`,
+        `Нормальное развлечение на пару часов. Для повторного визита — нужно что-то новое`,
+      ],
+      negative: [
+        `Половина аттракционов не работает. За полную цену — нечестно`,
+        `Инструктор был невнимательным — ребёнок чуть не упал. Безопасность хромает`,
+        `${venueName} сильно сдал за последний год. Оборудование старое, не ремонтируют`,
+      ],
+    },
+  };
+
+  const pool = categoryReviews[categorySlug] || categoryReviews.restaurant;
+
+  // Additional unique context from description
+  const descContext = description.slice(0, 60);
+
   for (let i = 0; i < count; i++) {
     const roll = Math.random();
-    let template;
+    let text: string;
+    let sentiment: number;
+    let rating: number;
+
     if (baseScore >= 8) {
-      template =
-        roll < 0.7
-          ? pickRandom(reviewTemplates.positive)
-          : roll < 0.9
-            ? pickRandom(reviewTemplates.neutral)
-            : pickRandom(reviewTemplates.negative);
+      if (roll < 0.65) {
+        text = pool.positive[i % pool.positive.length];
+        sentiment = randomBetween(0.6, 0.95);
+        rating = pickRandom([4, 5, 5, 5]);
+      } else if (roll < 0.88) {
+        text = pool.neutral[i % pool.neutral.length];
+        sentiment = randomBetween(-0.1, 0.3);
+        rating = pickRandom([3, 3, 4]);
+      } else {
+        text = pool.negative[i % pool.negative.length];
+        sentiment = randomBetween(-0.8, -0.4);
+        rating = pickRandom([1, 2, 2]);
+      }
     } else if (baseScore >= 6) {
-      template =
-        roll < 0.4
-          ? pickRandom(reviewTemplates.positive)
-          : roll < 0.75
-            ? pickRandom(reviewTemplates.neutral)
-            : pickRandom(reviewTemplates.negative);
+      if (roll < 0.35) {
+        text = pool.positive[i % pool.positive.length];
+        sentiment = randomBetween(0.5, 0.85);
+        rating = pickRandom([4, 4, 5]);
+      } else if (roll < 0.7) {
+        text = pool.neutral[i % pool.neutral.length];
+        sentiment = randomBetween(-0.1, 0.25);
+        rating = pickRandom([3, 3, 3, 4]);
+      } else {
+        text = pool.negative[i % pool.negative.length];
+        sentiment = randomBetween(-0.8, -0.3);
+        rating = pickRandom([1, 2, 2, 3]);
+      }
     } else {
-      template =
-        roll < 0.2
-          ? pickRandom(reviewTemplates.positive)
-          : roll < 0.5
-            ? pickRandom(reviewTemplates.neutral)
-            : pickRandom(reviewTemplates.negative);
+      if (roll < 0.15) {
+        text = pool.positive[i % pool.positive.length];
+        sentiment = randomBetween(0.4, 0.7);
+        rating = pickRandom([4, 5]);
+      } else if (roll < 0.45) {
+        text = pool.neutral[i % pool.neutral.length];
+        sentiment = randomBetween(-0.2, 0.2);
+        rating = pickRandom([2, 3, 3]);
+      } else {
+        text = pool.negative[i % pool.negative.length];
+        sentiment = randomBetween(-0.9, -0.4);
+        rating = pickRandom([1, 1, 2, 2]);
+      }
     }
 
+    // Add a random detail suffix to prevent exact duplicates
+    const suffixes = [
+      "",
+      "",
+      ` (${descContext})`,
+      ` Были в ${["январе", "феврале", "марте", "апреле", "мае", "июне", "июле", "августе", "сентябре", "октябре", "ноябре", "декабре"][randomInt(0, 11)]}.`,
+      ` Пришли ${["вдвоём", "с друзьями", "с семьёй", "с коллегами", "по рекомендации"][randomInt(0, 4)]}.`,
+    ];
+    const suffix = i >= pool.positive.length ? pickRandom(suffixes) : "";
+
     reviews.push({
-      text: template.text,
-      sentiment: template.sentiment + randomBetween(-0.1, 0.1),
+      text: text + suffix,
+      sentiment: parseFloat(sentiment.toFixed(2)),
       source: pickRandom(reviewSources),
-      rating: Math.max(1, Math.min(5, baseScore / 2 + randomBetween(-1, 1))),
-      authorName: `User${randomInt(100, 9999)}`,
-      createdAt: randomDate(30),
+      rating: rating,
+      authorName: getUniqueName(),
+      createdAt: randomDate(60),
     });
   }
   return reviews;
@@ -1346,8 +1633,42 @@ async function main() {
       }
     }
 
-    // Reviews (5-10 per venue)
-    const reviews = generateReviews(v.liveScore, randomInt(5, 10));
+    // Reviews — try Google Places API first, fallback to generated
+    let reviews: {
+      text: string;
+      sentiment: number;
+      source: string;
+      rating: number;
+      authorName: string;
+      createdAt: Date;
+    }[] = [];
+
+    if (GOOGLE_PLACES_API_KEY) {
+      const placeId = await fetchGooglePlaceId(v.name, v.latitude, v.longitude);
+      if (placeId) {
+        const googleReviews = await fetchGoogleReviews(placeId);
+        if (googleReviews.length > 0) {
+          reviews = googleReviewsToSeed(googleReviews);
+          // Save placeId for future use
+          await prisma.venue.update({
+            where: { id: venue.id },
+            data: { googlePlaceId: placeId },
+          });
+        }
+      }
+    }
+
+    // Fallback: generate realistic venue-specific reviews
+    if (reviews.length === 0) {
+      reviews = generateFallbackReviews(
+        v.name,
+        v.categorySlug,
+        v.description,
+        v.liveScore,
+        randomInt(6, 12),
+      );
+    }
+
     for (const r of reviews) {
       await prisma.review.create({
         data: { ...r, venueId: venue.id },

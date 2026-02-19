@@ -8,10 +8,12 @@ export class AnalyticsService {
     const venue = await prisma.venue.findUnique({
       where: { id: venueId },
       include: {
+        category: { select: { name: true } },
         reviews: {
           orderBy: { createdAt: "desc" },
           take: 50,
         },
+        _count: { select: { reviews: true } },
       },
     });
 
@@ -49,15 +51,44 @@ export class AnalyticsService {
       venue.liveScore,
     );
 
+    // Parse AI analysis from aiDescription (set by sync-pulse pipeline)
+    let aiAnalysis: DashboardData["aiAnalysis"] = null;
+    if (venue.aiDescription) {
+      const parts = venue.aiDescription.split(". ");
+      const summary = parts[0] || "";
+      const strongLine = parts.find((p) => p.startsWith("Сильные стороны:"));
+      const weakLine = parts.find((p) => p.startsWith("Зоны роста:"));
+      const trendLine = parts.find((p) => p.startsWith("Тренд:"));
+
+      const strongPoints = strongLine
+        ? strongLine.replace("Сильные стороны: ", "").split(", ")
+        : [];
+      const weakPoints = weakLine
+        ? weakLine.replace("Зоны роста: ", "").split(", ")
+        : [];
+      const sentimentTrend = trendLine?.includes("улучшается")
+        ? ("improving" as const)
+        : trendLine?.includes("ухудшается")
+          ? ("declining" as const)
+          : ("stable" as const);
+
+      aiAnalysis = { summary, weakPoints, strongPoints, sentimentTrend };
+    }
+
     return {
       venue: {
         id: venue.id,
         name: venue.name,
         liveScore: venue.liveScore,
+        category: venue.category.name,
+        address: venue.address,
+        reviewCount: venue._count.reviews,
       },
       scoreHistory,
       topComplaints,
       actionPlan,
+      aiAnalysis,
+      generatedAt: new Date().toISOString(),
       districtComparison: {
         venueScore: venue.liveScore,
         districtAvg: district.avg,
