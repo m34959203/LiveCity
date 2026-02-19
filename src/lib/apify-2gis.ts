@@ -107,18 +107,48 @@ export class Apify2GisClient {
             const actorInfo = raw?.data ?? raw;
             const actorName = actorInfo?.name ?? "unknown";
             const actorUsername = actorInfo?.username ?? "unknown";
-            // Try to find input schema in builds or versions
-            const inputSchema = actorInfo?.taggedBuilds?.latest?.inputSchema
-              ?? actorInfo?.versions?.[0]?.inputSchema
-              ?? "no-schema";
-            const schemaStr = typeof inputSchema === "string" ? inputSchema.slice(0, 800) : JSON.stringify(inputSchema).slice(0, 800);
-            logger.info(`2GIS Apify: actor=${actorUsername}/${actorName} | schema=${schemaStr}`, {
+
+            // Log exampleRunInput — this shows the expected input format!
+            const exampleInput = JSON.stringify(actorInfo?.exampleRunInput ?? "none").slice(0, 500);
+            logger.info(`2GIS Apify: actor=${actorUsername}/${actorName} | exampleRunInput=${exampleInput}`, {
               endpoint: "Apify2GisClient.searchPlaces",
             });
-            // Log raw keys for debugging
-            logger.info(`2GIS Apify: actorInfo keys=${Object.keys(actorInfo).join(",")} | id=${actorInfo?.id}`, {
-              endpoint: "Apify2GisClient.searchPlaces",
-            });
+
+            // Log latest build details for input schema
+            const latestBuild = actorInfo?.taggedBuilds?.latest;
+            if (latestBuild) {
+              const buildId = latestBuild.buildId ?? latestBuild.id ?? "unknown";
+              logger.info(`2GIS Apify: latest buildId=${buildId} | buildKeys=${Object.keys(latestBuild).join(",")}`, {
+                endpoint: "Apify2GisClient.searchPlaces",
+              });
+            }
+
+            // Log versions
+            const versions = actorInfo?.versions;
+            if (Array.isArray(versions) && versions.length > 0) {
+              const latestVersion = versions[versions.length - 1];
+              logger.info(`2GIS Apify: latestVersion=${JSON.stringify(latestVersion).slice(0, 500)}`, {
+                endpoint: "Apify2GisClient.searchPlaces",
+              });
+            }
+
+            // Try fetching the build's input schema directly
+            const buildId = latestBuild?.buildId ?? latestBuild?.id;
+            if (buildId) {
+              const buildRes = await fetch(
+                `https://api.apify.com/v2/acts/${this.actorId}/builds/${buildId}?token=${this.token}`,
+                { signal: AbortSignal.timeout(10_000) },
+              );
+              if (buildRes.ok) {
+                const buildRaw = await buildRes.json();
+                const buildData = buildRaw?.data ?? buildRaw;
+                const buildInputSchema = buildData?.inputSchema ?? buildData?.actInputSchema ?? "no-build-schema";
+                const schemaStr = typeof buildInputSchema === "string" ? buildInputSchema.slice(0, 800) : JSON.stringify(buildInputSchema).slice(0, 800);
+                logger.info(`2GIS Apify: build inputSchema=${schemaStr}`, {
+                  endpoint: "Apify2GisClient.searchPlaces",
+                });
+              }
+            }
           }
 
           // Send empty body to discover required fields via validation error
