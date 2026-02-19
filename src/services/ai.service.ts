@@ -1,4 +1,5 @@
 import { geminiModel } from "@/lib/gemini";
+import { SocialSignalService } from "./social-signal.service";
 import type { VenueListItem } from "@/types/venue";
 
 interface AISearchResult {
@@ -17,6 +18,7 @@ interface AIActionPlan {
 export class AIService {
   /**
    * Semantic search: rank venues by natural language query.
+   * Now includes social pulse data so AI knows which venues are ALIVE right now.
    */
   static async semanticSearch(
     query: string,
@@ -26,16 +28,31 @@ export class AIService {
     results: AISearchResult[];
     interpretation: string;
   }> {
-    const venueContext = venues.slice(0, 50).map((v) => ({
-      id: v.id,
-      name: v.name,
-      category: v.category.name,
-      address: v.address,
-      score: v.liveScore,
-      tags: v.tags.join(", "),
-      lat: v.latitude,
-      lng: v.longitude,
-    }));
+    // Enrich venue context with social pulse
+    const top50 = venues.slice(0, 50);
+    const pulsePromises = top50.map((v) =>
+      SocialSignalService.getSocialPulse(v.id).catch(() => null),
+    );
+    const pulses = await Promise.all(pulsePromises);
+
+    const venueContext = top50.map((v, i) => {
+      const p = pulses[i];
+      return {
+        id: v.id,
+        name: v.name,
+        category: v.category.name,
+        address: v.address,
+        score: v.liveScore,
+        tags: v.tags.join(", "),
+        lat: v.latitude,
+        lng: v.longitude,
+        ...(p && {
+          socialMentions: p.totalMentions,
+          socialSentiment: p.avgSentiment,
+          socialTrend: p.trend,
+        }),
+      };
+    });
 
     const locationHint = location
       ? `Пользователь находится: lat=${location.latitude}, lng=${location.longitude}. Учитывай расстояние.`
@@ -46,14 +63,14 @@ export class AIService {
 Запрос: "${query}"
 ${locationHint}
 
-Вот список заведений (JSON):
+Вот список заведений (JSON). Поля socialMentions/socialSentiment/socialTrend показывают РЕАЛЬНУЮ активность в соцсетях за последнюю неделю. Чем больше упоминаний и чем выше настроение — тем «живее» место прямо сейчас. Предпочитай места с высокой активностью и позитивным настроением.
 ${JSON.stringify(venueContext)}
 
 Выбери до 5 наиболее подходящих заведений. Ответь СТРОГО в JSON формате:
 {
   "interpretation": "краткое описание что ищет пользователь (1 предложение на русском)",
   "results": [
-    {"venueId": "id", "relevance": 0.95, "reason": "почему подходит (1-2 предложения на русском)"}
+    {"venueId": "id", "relevance": 0.95, "reason": "почему подходит (1-2 предложения на русском, упомяни социальную активность если она высокая)"}
   ]
 }
 

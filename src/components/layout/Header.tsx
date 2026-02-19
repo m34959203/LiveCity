@@ -13,6 +13,22 @@ export function Header() {
         <div className="h-6 w-6 rounded-full bg-gradient-to-br from-emerald-400 to-cyan-500" />
         <span className="text-sm font-bold text-white">LiveCity</span>
       </Link>
+
+      {/* Nav links - floating top right */}
+      <div className="absolute right-3 top-4 z-30 flex items-center gap-1.5 sm:right-4">
+        <Link
+          href="/planner"
+          className="rounded-lg bg-zinc-900/90 px-3 py-2 text-xs font-medium text-zinc-300 backdrop-blur hover:text-white"
+        >
+          Планировщик
+        </Link>
+        <Link
+          href="/dashboard"
+          className="rounded-lg bg-zinc-900/90 px-3 py-2 text-xs font-medium text-zinc-300 backdrop-blur hover:text-white"
+        >
+          Бизнесу
+        </Link>
+      </div>
     </header>
   );
 }
