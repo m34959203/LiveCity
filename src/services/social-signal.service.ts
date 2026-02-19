@@ -256,11 +256,34 @@ export class SocialSignalService {
       }
 
       const runData = await runRes.json();
+      const runId = runData.data?.id;
       const datasetId = runData.data?.defaultDatasetId;
-      if (!datasetId) return;
+      if (!runId || !datasetId) return;
 
-      // Wait for run to complete (poll with timeout)
-      await new Promise((resolve) => setTimeout(resolve, 15_000));
+      // Poll for completion (max 2 min, check every 10s)
+      const maxWait = 120_000;
+      const pollInterval = 10_000;
+      const startTime = Date.now();
+
+      while (Date.now() - startTime < maxWait) {
+        await new Promise((resolve) => setTimeout(resolve, pollInterval));
+
+        const statusRes = await fetch(
+          `https://api.apify.com/v2/actor-runs/${runId}?token=${token}`,
+          { signal: AbortSignal.timeout(10_000) },
+        );
+        if (!statusRes.ok) continue;
+
+        const statusData = await statusRes.json();
+        const status = statusData.data?.status;
+        if (status === "SUCCEEDED") break;
+        if (status === "FAILED" || status === "ABORTED" || status === "TIMED-OUT") {
+          logger.warn(`2GIS Apify run ${status}`, {
+            endpoint: "SocialSignalService.collect2GisSignals",
+          });
+          return;
+        }
+      }
 
       // Fetch results
       const dataRes = await fetch(
@@ -343,17 +366,22 @@ export class SocialSignalService {
   }
 
   // ------------------------------------------
-  // INSTAGRAM: Mentions via Apify scraper
+  // INSTAGRAM: Mentions via apify/instagram-scraper
   // ------------------------------------------
 
   /**
-   * Collect Instagram mentions via Apify actor.
-   * Requires: APIFY_TOKEN + APIFY_INSTA_ACTOR env vars.
+   * Collect Instagram signals via `apify/instagram-scraper` actor.
+   * Actor ID: shu8hvrXbJbY3Eb9W (apify/instagram-scraper)
+   * Pricing: from $1.50 / 1,000 results
    *
-   * What we collect:
-   * - Posts/stories tagged at venue location
-   * - Comments on venue's own posts
-   * - Mention volume = "hype" metric for Live Score
+   * Input: { directUrls, resultsType, resultsLimit, onlyPostsNewerThan }
+   * Output: { caption, likesCount, commentsCount, timestamp, ownerUsername, ... }
+   *   - likesCount = -1 means author hid like count
+   *
+   * What we extract:
+   * - Posts from venue's Instagram profile (last 7 days)
+   * - Engagement (likes + comments * 3) → mentionCount for Live Score
+   * - Captions → Gemini sentiment analysis
    */
   private static async collectInstagramSignals(
     venue: VenueForCollection,
@@ -362,17 +390,23 @@ export class SocialSignalService {
 
     try {
       const token = process.env.APIFY_TOKEN;
-      const actorId = process.env.APIFY_INSTA_ACTOR;
+      const actorId = process.env.APIFY_INSTA_ACTOR || "apify/instagram-scraper";
 
+      // Only fetch posts from the last 7 days
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      const profileUrl = `https://www.instagram.com/${venue.instagramHandle.replace("@", "")}/`;
+
+      // 1. Start actor run
       const runRes = await fetch(
         `https://api.apify.com/v2/acts/${actorId}/runs?token=${token}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            directUrls: [`https://www.instagram.com/${venue.instagramHandle?.replace("@", "")}/`],
+            directUrls: [profileUrl],
             resultsType: "posts",
-            resultsLimit: 10,
+            resultsLimit: 20,
+            onlyPostsNewerThan: sevenDaysAgo.toISOString(),
           }),
           signal: AbortSignal.timeout(30_000),
         },
@@ -387,12 +421,36 @@ export class SocialSignalService {
       }
 
       const runData = await runRes.json();
+      const runId = runData.data?.id;
       const datasetId = runData.data?.defaultDatasetId;
-      if (!datasetId) return;
+      if (!runId || !datasetId) return;
 
-      // Wait for scraper
-      await new Promise((resolve) => setTimeout(resolve, 20_000));
+      // 2. Poll for completion (max 2 min, check every 10s)
+      const maxWait = 120_000;
+      const pollInterval = 10_000;
+      const startTime = Date.now();
 
+      while (Date.now() - startTime < maxWait) {
+        await new Promise((resolve) => setTimeout(resolve, pollInterval));
+
+        const statusRes = await fetch(
+          `https://api.apify.com/v2/actor-runs/${runId}?token=${token}`,
+          { signal: AbortSignal.timeout(10_000) },
+        );
+        if (!statusRes.ok) continue;
+
+        const statusData = await statusRes.json();
+        const status = statusData.data?.status;
+        if (status === "SUCCEEDED") break;
+        if (status === "FAILED" || status === "ABORTED" || status === "TIMED-OUT") {
+          logger.warn(`Instagram Apify run ${status}`, {
+            endpoint: "SocialSignalService.collectInstagramSignals",
+          });
+          return;
+        }
+      }
+
+      // 3. Fetch results from dataset
       const dataRes = await fetch(
         `https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&format=json`,
         { signal: AbortSignal.timeout(10_000) },
@@ -400,22 +458,34 @@ export class SocialSignalService {
 
       if (!dataRes.ok) return;
 
-      const posts: { caption?: string; likesCount?: number; commentsCount?: number; timestamp?: string }[] =
-        await dataRes.json();
+      interface InstaPost {
+        caption?: string;
+        likesCount?: number;
+        commentsCount?: number;
+        timestamp?: string;
+        ownerUsername?: string;
+        type?: string;    // "Image", "Video", "Sidecar" (carousel)
+        videoViewCount?: number;
+      }
+
+      const posts: InstaPost[] = await dataRes.json();
 
       if (posts.length === 0) return;
 
-      // Calculate mention volume and sentiment from captions
-      const totalEngagement = posts.reduce(
-        (sum, p) => sum + (p.likesCount || 0) + (p.commentsCount || 0) * 3,
-        0,
-      );
+      // 4. Calculate engagement (likesCount = -1 means hidden, treat as 0)
+      const totalEngagement = posts.reduce((sum, p) => {
+        const likes = (p.likesCount ?? 0) > 0 ? p.likesCount! : 0;
+        const comments = (p.commentsCount ?? 0) * 3; // Comments weighted 3x
+        const views = Math.floor((p.videoViewCount ?? 0) / 10); // Video views weighted 1/10
+        return sum + likes + comments + views;
+      }, 0);
 
+      // 5. Sentiment analysis on captions
       const captions = posts
         .map((p) => p.caption)
         .filter((c): c is string => !!c && c.length > 5);
 
-      let avgSentiment = 0.3; // Instagram skews positive (people post good moments)
+      let avgSentiment = 0.3; // Instagram skews positive by nature
       if (captions.length > 0) {
         const sentiments = await this.batchAnalyzeSentiment(
           captions.map((text) => ({
@@ -431,7 +501,8 @@ export class SocialSignalService {
           sentiments.reduce((a, b) => a + b, 0) / sentiments.length;
       }
 
-      // Normalize engagement to mention count (rough: 1000 engagement ≈ 10 mentions)
+      // 6. Normalize engagement → mention count
+      //    ~100 engagement ≈ 1 "mention" in our system
       const mentionCount = Math.max(1, Math.round(totalEngagement / 100));
 
       await prisma.socialSignal.create({
