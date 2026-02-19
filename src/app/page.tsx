@@ -8,8 +8,12 @@ import { SearchResults } from "@/components/search/SearchResults";
 import { VenueDetails } from "@/components/venue/VenueDetails";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { CategoryFilter } from "@/components/map/CategoryFilter";
+import { CitySelector } from "@/components/city/CitySelector";
+import { getCityById, type CityConfig } from "@/lib/cities";
 import type { VenueListItem } from "@/types/venue";
 import type { SearchResultItem } from "@/types/search";
+
+const STORAGE_KEY = "livecity-city";
 
 // Mapbox must load client-side only
 const MapView = dynamic(
@@ -24,7 +28,21 @@ const MapView = dynamic(
   },
 );
 
+function loadSavedCity(): CityConfig | null {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      const city = getCityById(saved);
+      if (city) return city;
+    }
+  } catch {
+    // SSR or localStorage unavailable
+  }
+  return null;
+}
+
 export default function Home() {
+  const [city, setCity] = useState<CityConfig | null>(() => loadSavedCity());
   const [venues, setVenues] = useState<VenueListItem[]>([]);
   const [selectedVenueId, setSelectedVenueId] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<SearchResultItem[]>([]);
@@ -34,8 +52,20 @@ export default function Home() {
   const [venuesError, setVenuesError] = useState(false);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
 
+  // Handle city selection
+  const handleCitySelect = useCallback((selected: CityConfig) => {
+    setCity(selected);
+    try {
+      localStorage.setItem(STORAGE_KEY, selected.id);
+    } catch {
+      // localStorage unavailable
+    }
+  }, []);
+
   // Load venues + auto-refresh every 2 min for live scores
   useEffect(() => {
+    if (!city) return;
+
     const load = () =>
       fetch("/api/venues?limit=100")
         .then((r) => r.json())
@@ -45,7 +75,7 @@ export default function Home() {
     load();
     const interval = setInterval(load, 120_000);
     return () => clearInterval(interval);
-  }, []);
+  }, [city]);
 
   // Filter venues by category
   const filteredVenues = useMemo(() => {
@@ -65,7 +95,7 @@ export default function Home() {
     return () => window.removeEventListener("keydown", handleKey);
   }, []);
 
-  // AI Search
+  // AI Search — pass selected city to backend
   const handleSearch = useCallback(async (query: string) => {
     setSearchLoading(true);
     setShowSearchResults(true);
@@ -75,7 +105,7 @@ export default function Home() {
       const res = await fetch("/api/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query, limit: 5 }),
+        body: JSON.stringify({ query, city: city?.name, limit: 5 }),
       });
       const data = await res.json();
       if (data.data) {
@@ -87,15 +117,20 @@ export default function Home() {
     } finally {
       setSearchLoading(false);
     }
-  }, []);
+  }, [city]);
 
   const handleVenueClick = useCallback((venueId: string) => {
     setSelectedVenueId(venueId);
   }, []);
 
+  // Show city selector if no city chosen
+  if (!city) {
+    return <CitySelector onSelect={handleCitySelect} />;
+  }
+
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-zinc-950">
-      <Header />
+      <Header city={city} onCityChange={() => setCity(null)} />
 
       {/* Search */}
       <SearchBar onSearch={handleSearch} isLoading={searchLoading} />
@@ -126,6 +161,8 @@ export default function Home() {
           venues={filteredVenues}
           onVenueClick={handleVenueClick}
           selectedVenueId={selectedVenueId}
+          center={{ lat: city.lat, lng: city.lng }}
+          zoom={city.zoom}
         />
       </ErrorBoundary>
 

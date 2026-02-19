@@ -9,23 +9,22 @@ import { MapControls } from "./MapControls";
 import type { VenueListItem } from "@/types/venue";
 
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || "";
-const DEFAULT_LAT = Number(process.env.NEXT_PUBLIC_DEFAULT_LAT) || 43.2220;
-const DEFAULT_LNG = Number(process.env.NEXT_PUBLIC_DEFAULT_LNG) || 76.8512;
-const DEFAULT_ZOOM = Number(process.env.NEXT_PUBLIC_DEFAULT_ZOOM) || 13;
 
 interface MapViewProps {
   venues: VenueListItem[];
   onVenueClick: (venueId: string) => void;
   selectedVenueId: string | null;
+  center: { lat: number; lng: number };
+  zoom: number;
 }
 
-export function MapView({ venues, onVenueClick, selectedVenueId }: MapViewProps) {
+export function MapView({ venues, onVenueClick, selectedVenueId, center, zoom }: MapViewProps) {
   const mapRef = useRef<MapRef>(null);
   const [showHeatmap, setShowHeatmap] = useState(false);
   const [viewState, setViewState] = useState({
-    latitude: DEFAULT_LAT,
-    longitude: DEFAULT_LNG,
-    zoom: DEFAULT_ZOOM,
+    latitude: center.lat,
+    longitude: center.lng,
+    zoom,
   });
 
   const handleMove = useCallback((evt: ViewStateChangeEvent) => {

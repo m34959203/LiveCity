@@ -24,6 +24,7 @@ export class AIService {
     query: string,
     venues: VenueListItem[],
     location?: { latitude: number; longitude: number },
+    cityName: string = "Алматы",
   ): Promise<{
     results: AISearchResult[];
     interpretation: string;
@@ -58,7 +59,7 @@ export class AIService {
       ? `Пользователь находится: lat=${location.latitude}, lng=${location.longitude}. Учитывай расстояние.`
       : "";
 
-    const prompt = `Ты — AI-ассистент платформы LiveCity (Алматы). Пользователь ищет заведение.
+    const prompt = `Ты — AI-ассистент платформы LiveCity (${cityName}). Пользователь ищет заведение.
 
 Запрос: "${query}"
 ${locationHint}

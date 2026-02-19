@@ -45,7 +45,8 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { query, location, limit = 5 } = body;
+    const { query, city: cityName, location, limit = 5 } = body;
+    const searchCity = (typeof cityName === "string" && cityName.trim()) ? cityName.trim() : DEFAULT_CITY;
 
     if (!query || typeof query !== "string" || query.trim().length < 2) {
       return NextResponse.json(
@@ -67,6 +68,7 @@ export async function POST(request: NextRequest) {
       query.trim(),
       venues,
       location,
+      searchCity,
     );
 
     // Enrich results with full venue data
@@ -93,7 +95,7 @@ export async function POST(request: NextRequest) {
 
       const twoGisResults = await twoGisClient.searchPlaces(
         query.trim(),
-        DEFAULT_CITY,
+        searchCity,
         5,
         30_000, // 30s timeout for interactive search (vs 120s for cron)
       );
