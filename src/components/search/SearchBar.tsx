@@ -26,7 +26,7 @@ export function SearchBar({ onSearch, isLoading }: SearchBarProps) {
   );
 
   return (
-    <div className="absolute left-3 right-3 top-3 z-20 sm:left-4 sm:right-16 sm:top-4">
+    <div className="absolute left-36 right-3 top-3 z-20 sm:left-40 sm:right-16 sm:top-4">
       <form onSubmit={handleSubmit}>
         <div className="relative">
           <input
