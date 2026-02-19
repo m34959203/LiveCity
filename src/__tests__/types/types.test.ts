@@ -81,11 +81,12 @@ describe("Type contracts", () => {
     const comparison: DistrictComparison = { venueScore: 8, districtAvg: 7, cityAvg: 6.5, rank: 2, totalInDistrict: 20 };
 
     const dashboard: DashboardData = {
-      venue: { id: "1", name: "Test", liveScore: 8 },
+      venue: { id: "1", name: "Test", liveScore: 8, category: "Кафе", address: "ул. Тестовая, 1", reviewCount: 10 },
       scoreHistory: [history],
       topComplaints: [complaint],
       actionPlan: [action],
       districtComparison: comparison,
+      generatedAt: "2026-02-01T00:00:00.000Z",
     };
 
     expect(dashboard.venue.id).toBe("1");
