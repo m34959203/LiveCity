@@ -34,12 +34,17 @@ export default function Home() {
   const [venuesError, setVenuesError] = useState(false);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
 
-  // Load venues
+  // Load venues + auto-refresh every 2 min for live scores
   useEffect(() => {
-    fetch("/api/venues?limit=100")
-      .then((r) => r.json())
-      .then((res) => setVenues(res.data || []))
-      .catch(() => setVenuesError(true));
+    const load = () =>
+      fetch("/api/venues?limit=100")
+        .then((r) => r.json())
+        .then((res) => setVenues(res.data || []))
+        .catch(() => setVenuesError(true));
+
+    load();
+    const interval = setInterval(load, 120_000);
+    return () => clearInterval(interval);
   }, []);
 
   // Filter venues by category

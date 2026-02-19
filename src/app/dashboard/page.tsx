@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useEffect, useState, useCallback } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { LiveScoreBadge } from "@/components/ui/LiveScoreBadge";
 import { ScoreChart } from "@/components/dashboard/ScoreChart";
@@ -33,6 +33,12 @@ interface CompetitorData {
   summary: string;
 }
 
+interface VenueOption {
+  id: string;
+  name: string;
+  liveScore: number;
+}
+
 function DashboardSkeleton() {
   return (
     <div className="animate-pulse">
@@ -57,20 +63,23 @@ function DashboardSkeleton() {
 
 export default function DashboardPage() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const [data, setData] = useState<DashboardData | null>(null);
   const [pulse, setPulse] = useState<SocialPulseData | null>(null);
   const [competitors, setCompetitors] = useState<CompetitorData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [venueId, setVenueId] = useState<string>("");
+  const [venueOptions, setVenueOptions] = useState<VenueOption[]>([]);
 
-  useEffect(() => {
-    const qsVenueId = searchParams.get("venueId");
+  const loadDashboard = useCallback(async (id: string) => {
+    setVenueId(id);
+    setLoading(true);
+    setData(null);
+    setPulse(null);
+    setCompetitors(null);
 
-    const loadDashboard = async (id: string) => {
-      setVenueId(id);
-
-      // Load all data in parallel
+    try {
       const [dashRes, pulseRes, compRes] = await Promise.all([
         fetch(`/api/dashboard/${id}`).then((r) => r.json()),
         fetch(`/api/venues/${id}/pulse`).then((r) => r.json()),
@@ -80,32 +89,62 @@ export default function DashboardPage() {
       if (dashRes.data) setData(dashRes.data);
       if (pulseRes.data) setPulse(pulseRes.data);
       if (compRes.data) setCompetitors(compRes.data);
-    };
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Ошибка загрузки");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Load venue list for selector
+  useEffect(() => {
+    fetch("/api/venues?limit=100")
+      .then((r) => r.json())
+      .then((res) => {
+        const venues = (res.data || []).map(
+          (v: { id: string; name: string; liveScore: number }) => ({
+            id: v.id,
+            name: v.name,
+            liveScore: v.liveScore,
+          }),
+        );
+        setVenueOptions(venues);
+      })
+      .catch(() => {});
+  }, []);
+
+  // Initial load
+  useEffect(() => {
+    const qsVenueId = searchParams.get("venueId");
 
     const init = async () => {
       try {
         if (qsVenueId) {
           await loadDashboard(qsVenueId);
+        } else if (venueOptions.length > 0) {
+          await loadDashboard(venueOptions[0].id);
         } else {
-          // Load first venue for demo
           const res = await fetch("/api/venues?limit=1");
           const json = await res.json();
           const id = json.data?.[0]?.id;
-          if (id) {
-            await loadDashboard(id);
-          } else {
-            throw new Error("No venues");
-          }
+          if (id) await loadDashboard(id);
+          else throw new Error("No venues");
         }
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : "Ошибка загрузки");
-      } finally {
         setLoading(false);
       }
     };
 
     init();
-  }, [searchParams]);
+  }, [searchParams, loadDashboard, venueOptions]);
+
+  const handleVenueSwitch = useCallback(
+    (id: string) => {
+      router.push(`/dashboard?venueId=${id}`);
+    },
+    [router],
+  );
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
@@ -141,6 +180,26 @@ export default function DashboardPage() {
 
       {/* Content */}
       <main className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-8">
+        {/* Venue Selector */}
+        {venueOptions.length > 1 && (
+          <div className="mb-6">
+            <label className="mb-1 block text-xs text-zinc-500">
+              Выберите заведение
+            </label>
+            <select
+              value={venueId}
+              onChange={(e) => handleVenueSwitch(e.target.value)}
+              className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white focus:border-emerald-500 focus:outline-none sm:w-auto sm:min-w-[300px]"
+            >
+              {venueOptions.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.name} — {v.liveScore.toFixed(1)}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
         {loading && <DashboardSkeleton />}
 
         {data && !loading && (

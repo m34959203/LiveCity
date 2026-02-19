@@ -15,9 +15,19 @@ function markerColor(score: number): string {
   return "#71717a";
 }
 
+/**
+ * Pulse intensity based on live score.
+ * High score = active venue = visible pulse animation.
+ * Low score = "dead" venue = no pulse.
+ */
+function shouldPulse(score: number): boolean {
+  return score >= 7;
+}
+
 export function VenueMarker({ venue, isSelected, onClick }: VenueMarkerProps) {
   const color = markerColor(venue.liveScore);
   const scale = isSelected ? 1.3 : 1;
+  const pulse = shouldPulse(venue.liveScore);
 
   return (
     <Marker
@@ -30,15 +40,24 @@ export function VenueMarker({ venue, isSelected, onClick }: VenueMarkerProps) {
       }}
     >
       <div
-        className="cursor-pointer transition-transform duration-200"
+        className="relative cursor-pointer transition-transform duration-200"
         style={{ transform: `scale(${scale})` }}
         title={`${venue.name} — ${venue.liveScore}`}
       >
+        {/* Pulse ring for "alive" venues */}
+        {pulse && (
+          <div
+            className="absolute inset-0 animate-ping rounded-full opacity-30"
+            style={{ backgroundColor: color, animationDuration: "2s" }}
+          />
+        )}
+
+        {/* Main marker */}
         <div
-          className="flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold text-white shadow-lg"
+          className="relative flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold text-white shadow-lg"
           style={{
             backgroundColor: color,
-            boxShadow: `0 0 10px ${color}80`,
+            boxShadow: `0 0 ${pulse ? "14" : "10"}px ${color}${pulse ? "a0" : "80"}`,
           }}
         >
           {venue.liveScore.toFixed(0)}
