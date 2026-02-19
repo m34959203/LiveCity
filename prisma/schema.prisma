@@ -22,6 +22,7 @@ model Venue {
   longitude     Float
   phone         String?
   whatsapp      String?
+  googlePlaceId String?  @map("google_place_id")
   photoUrls     String[] @map("photo_urls")
   workingHours  Json?    @map("working_hours")
   liveScore     Float    @default(0) @map("live_score")

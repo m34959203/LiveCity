@@ -1,5 +1,19 @@
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
+import { GooglePlacesClient, type GoogleReview } from "@/lib/google-places";
+import { geminiModel } from "@/lib/gemini";
+
+// ============================================
+// Social Signal Service — REAL data collection
+// ============================================
+// Collects social signals from:
+//   1. Google Places API — reviews, ratings, review count
+//   2. Gemini AI — sentiment analysis on review texts
+//
+// Architecture: each source is a private method.
+// To add Instagram/TikTok later: add a new collectXxx method
+// and call it from collectSignals().
+// ============================================
 
 interface SocialPulse {
   totalMentions: number;
@@ -8,86 +22,258 @@ interface SocialPulse {
   sources: { source: string; mentions: number; sentiment: number }[];
 }
 
+interface VenueForCollection {
+  id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  googlePlaceId: string | null;
+}
+
+const googleClient = new GooglePlacesClient();
+
 export class SocialSignalService {
-  /**
-   * Collect fresh social signals for a venue.
-   * In production: call Instagram Graph API, Google Places API, TikTok API.
-   * Now: simulate realistic signals based on venue data + time patterns.
-   */
+  // ------------------------------------------
+  // PUBLIC: Collect signals for a single venue
+  // ------------------------------------------
   static async collectSignals(venueId: string): Promise<void> {
     const venue = await prisma.venue.findUnique({
       where: { id: venueId },
-      select: { liveScore: true, name: true },
+      select: {
+        id: true,
+        name: true,
+        latitude: true,
+        longitude: true,
+        googlePlaceId: true,
+      },
     });
     if (!venue) return;
 
-    const hour = new Date().getHours();
-    const day = new Date().getDay();
-    const isWeekend = day === 0 || day === 6;
-    const isPeakHours =
-      (hour >= 11 && hour < 14) || (hour >= 18 && hour < 23);
-
-    const sources = ["instagram", "google_maps", "tiktok"] as const;
-
-    for (const source of sources) {
-      // Base mentions proportional to venue quality
-      let baseMentions = Math.round(venue.liveScore * 2);
-
-      // Time modifiers
-      if (isPeakHours) baseMentions = Math.round(baseMentions * 1.5);
-      if (isWeekend) baseMentions = Math.round(baseMentions * 1.3);
-
-      // Source-specific patterns
-      if (source === "instagram") baseMentions = Math.round(baseMentions * 1.2);
-      if (source === "tiktok") baseMentions = Math.round(baseMentions * 0.7);
-
-      // Add realistic variance (±30%)
-      const variance = 1 + (Math.random() - 0.5) * 0.6;
-      const mentionCount = Math.max(0, Math.round(baseMentions * variance));
-
-      // Sentiment follows score but with noise
-      const baseSentiment = (venue.liveScore - 5) / 5; // -1 to 1 range
-      const sentimentNoise = (Math.random() - 0.5) * 0.4;
-      const sentimentAvg = Math.max(
-        -1,
-        Math.min(1, baseSentiment + sentimentNoise),
-      );
-
-      await prisma.socialSignal.create({
-        data: {
-          venueId,
-          source,
-          mentionCount,
-          sentimentAvg: Math.round(sentimentAvg * 100) / 100,
-        },
+    // Google Maps — real reviews & ratings
+    if (googleClient.isConfigured()) {
+      await this.collectGoogleSignals(venue);
+    } else {
+      logger.warn("GOOGLE_PLACES_API_KEY not set — skipping Google signals", {
+        endpoint: "SocialSignalService.collectSignals",
       });
     }
+
+    // Future sources:
+    // if (instagramClient.isConfigured()) await this.collectInstagramSignals(venue);
+    // if (tiktokClient.isConfigured()) await this.collectTikTokSignals(venue);
   }
 
-  /**
-   * Collect signals for all active venues.
-   */
+  // ------------------------------------------
+  // PUBLIC: Collect signals for all venues
+  // ------------------------------------------
   static async collectAllSignals(): Promise<number> {
     const venues = await prisma.venue.findMany({
       where: { isActive: true },
-      select: { id: true },
+      select: {
+        id: true,
+        name: true,
+        latitude: true,
+        longitude: true,
+        googlePlaceId: true,
+      },
     });
 
-    for (const v of venues) {
-      await this.collectSignals(v.id);
+    let collected = 0;
+    for (const venue of venues) {
+      try {
+        await this.collectSignals(venue.id);
+        collected++;
+      } catch (error) {
+        logger.error(`Signal collection failed for venue ${venue.name}`, {
+          endpoint: "SocialSignalService.collectAllSignals",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
 
-    logger.info("Social signals collected", {
-      endpoint: "SocialSignalService.collectAll",
+    logger.info(`Social signals collected for ${collected}/${venues.length} venues`, {
+      endpoint: "SocialSignalService.collectAllSignals",
     });
 
-    return venues.length;
+    return collected;
   }
+
+  // ------------------------------------------
+  // GOOGLE MAPS: Real reviews + ratings
+  // ------------------------------------------
+  private static async collectGoogleSignals(
+    venue: VenueForCollection,
+  ): Promise<void> {
+    // 1. Resolve Google Place ID if missing
+    let placeId = venue.googlePlaceId;
+
+    if (!placeId) {
+      placeId = await googleClient.findPlaceId(
+        venue.name,
+        venue.latitude,
+        venue.longitude,
+      );
+
+      if (placeId) {
+        await prisma.venue.update({
+          where: { id: venue.id },
+          data: { googlePlaceId: placeId },
+        });
+        logger.info(`Resolved placeId for "${venue.name}": ${placeId}`, {
+          endpoint: "SocialSignalService.collectGoogleSignals",
+        });
+      } else {
+        logger.warn(`Could not resolve placeId for "${venue.name}"`, {
+          endpoint: "SocialSignalService.collectGoogleSignals",
+        });
+        return;
+      }
+    }
+
+    // 2. Fetch place details
+    const details = await googleClient.getPlaceDetails(placeId);
+    if (!details) return;
+
+    // 3. Store new reviews and compute sentiment
+    let newReviewCount = 0;
+    let sentimentSum = 0;
+
+    if (details.reviews.length > 0) {
+      // Batch sentiment analysis for all new reviews at once (1 Gemini call)
+      const newReviews = await this.filterNewReviews(venue.id, details.reviews);
+
+      if (newReviews.length > 0) {
+        const sentiments = await this.batchAnalyzeSentiment(newReviews);
+
+        for (let i = 0; i < newReviews.length; i++) {
+          const review = newReviews[i];
+          const sentiment = sentiments[i] ?? this.ratingToSentiment(review.rating);
+
+          await prisma.review.create({
+            data: {
+              venueId: venue.id,
+              text: review.text || `Rating: ${review.rating}/5`,
+              sentiment,
+              source: "google",
+              rating: review.rating,
+              authorName: review.author_name,
+            },
+          });
+
+          sentimentSum += sentiment;
+          newReviewCount++;
+        }
+      }
+    }
+
+    // 4. Create SocialSignal record with real data
+    //    mentionCount = new reviews found in this collection
+    //    sentimentAvg = from Gemini analysis or fallback to rating-based
+    const sentimentAvg =
+      newReviewCount > 0
+        ? sentimentSum / newReviewCount
+        : this.ratingToSentiment(details.rating);
+
+    await prisma.socialSignal.create({
+      data: {
+        venueId: venue.id,
+        source: "google_maps",
+        mentionCount: newReviewCount > 0 ? newReviewCount : 1,
+        sentimentAvg: Math.round(sentimentAvg * 100) / 100,
+      },
+    });
+
+    logger.info(
+      `Google signals: "${venue.name}" — ${newReviewCount} new reviews, ` +
+        `rating ${details.rating}, total ${details.user_ratings_total}`,
+      { endpoint: "SocialSignalService.collectGoogleSignals" },
+    );
+  }
+
+  // ------------------------------------------
+  // SENTIMENT: Batch analysis via Gemini
+  // ------------------------------------------
+
+  /**
+   * Analyze sentiment of multiple reviews in a single Gemini call.
+   * Returns array of scores in [-1, 1] range.
+   */
+  private static async batchAnalyzeSentiment(
+    reviews: GoogleReview[],
+  ): Promise<number[]> {
+    if (reviews.length === 0) return [];
+
+    const reviewTexts = reviews
+      .map((r, i) => `[${i + 1}] ${r.text || `Rating: ${r.rating}/5`}`)
+      .join("\n");
+
+    try {
+      const result = await geminiModel.generateContent(
+        `Analyze the sentiment of each review below. ` +
+          `For each, return a number from -1.0 (very negative) to 1.0 (very positive). ` +
+          `Return ONLY a JSON array of numbers, one per review. ` +
+          `Example: [-0.3, 0.8, 0.5]\n\n${reviewTexts}`,
+      );
+
+      const text = result.response.text().trim();
+      // Extract JSON array from response
+      const match = text.match(/\[[\s\S]*?\]/);
+      if (!match) {
+        return reviews.map((r) => this.ratingToSentiment(r.rating));
+      }
+
+      const scores: unknown[] = JSON.parse(match[0]);
+      return scores.map((s, i) => {
+        const num = Number(s);
+        if (isNaN(num)) return this.ratingToSentiment(reviews[i].rating);
+        return Math.max(-1, Math.min(1, Math.round(num * 100) / 100));
+      });
+    } catch (error) {
+      logger.warn("Gemini sentiment analysis failed, using rating fallback", {
+        endpoint: "SocialSignalService.batchAnalyzeSentiment",
+        error: error instanceof Error ? error.message : String(error),
+      });
+      // Fallback: derive sentiment from star rating
+      return reviews.map((r) => this.ratingToSentiment(r.rating));
+    }
+  }
+
+  // ------------------------------------------
+  // HELPERS
+  // ------------------------------------------
+
+  /** Filter out reviews already stored in our DB */
+  private static async filterNewReviews(
+    venueId: string,
+    reviews: GoogleReview[],
+  ): Promise<GoogleReview[]> {
+    const existing = await prisma.review.findMany({
+      where: { venueId, source: "google" },
+      select: { authorName: true, text: true },
+    });
+
+    const existingKeys = new Set(
+      existing.map((r) => `${r.authorName}::${r.text?.slice(0, 50)}`),
+    );
+
+    return reviews.filter(
+      (r) => !existingKeys.has(`${r.author_name}::${r.text?.slice(0, 50)}`),
+    );
+  }
+
+  /** Convert 1-5 star rating to -1..1 sentiment */
+  private static ratingToSentiment(rating: number): number {
+    // 1 star → -1, 3 stars → 0, 5 stars → 1
+    return Math.round(((rating - 3) / 2) * 100) / 100;
+  }
+
+  // ------------------------------------------
+  // PULSE: Aggregation (unchanged — works with real data)
+  // ------------------------------------------
 
   /**
    * Calculate social pulse for a venue based on recent signals.
-   * This is the CORE of the "Truth Filter" — real social activity,
-   * not fake reviews.
+   * This is the CORE of the "Truth Filter" — real social activity.
    */
   static async getSocialPulse(venueId: string): Promise<SocialPulse> {
     const now = new Date();
@@ -165,9 +351,12 @@ export class SocialSignalService {
     return { totalMentions, avgSentiment, trend, sources };
   }
 
+  // ------------------------------------------
+  // LIVE SCORE: Formula (unchanged)
+  // ------------------------------------------
+
   /**
    * Calculate Live Score from social signals.
-   * This replaces the demo random jitter with REAL data.
    *
    * Formula:
    *   base (DB score) * 0.4
