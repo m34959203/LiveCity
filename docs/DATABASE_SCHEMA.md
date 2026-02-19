@@ -181,7 +181,7 @@ model SocialSignal {
 
 | Slug | Название | Иконка | Цвет | Кол-во заведений |
 |---|---|---|---|---|
-| restaurant | Ресторан | fork-knife | #E74C3C | 20 |
+| restaurant | Ресторан | utensils | #E74C3C | 20 |
 | cafe | Кафе | coffee | #F39C12 | 15 |
 | bar | Бар | beer | #9B59B6 | 10 |
 | park | Парк | tree | #27AE60 | 10 |
@@ -205,7 +205,7 @@ model SocialSignal {
 | 24h | Круглосуточно |
 | delivery | Доставка |
 | hookah | Кальян |
-| karaoke | Караоке |
+| vip | VIP-зал |
 
 ### 3.3. Автогенерация при seed
 

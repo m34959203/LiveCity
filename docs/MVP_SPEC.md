@@ -76,7 +76,7 @@
 **Реализация:**
 - `SearchBar`: floating input + 4 example chips
 - `POST /api/search` → `AIService.semanticSearch()` → Gemini 2.0 Flash
-- Gemini получает: запрос + JSON с 50 заведениями (id, name, category, address, score, tags)
+- Gemini получает: запрос + JSON со 100 заведениями (id, name, category, address, score, tags)
 - Возвращает: interpretation + top-5 results с relevance и reason
 - `SearchResults`: выезжающая панель с VenueCard и AI-reasons
 - Fallback: текстовый поиск при ошибке Gemini

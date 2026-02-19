@@ -63,9 +63,17 @@ npm run dev
 | `npm test` | Запуск Vitest (37 тестов) |
 | `npm run test:watch` | Vitest в watch-режиме |
 | `npm run format` | Prettier форматирование |
+| `npm run start` | Production-запуск (auto-seed + next start) |
 | `npm run db:seed` | Заполнение БД seed-данными (70 заведений) |
 | `npm run db:migrate` | Prisma миграции |
 | `npm run db:studio` | Prisma Studio (GUI для БД) |
+
+### Production Startup (`scripts/start.mjs`)
+
+Скрипт `npm run start` автоматизирует production-запуск:
+1. `prisma db push --skip-generate` — синхронизация схемы БД
+2. Проверка: если БД пустая → автоматический seed (70 заведений)
+3. `next start` — запуск production-сервера
 
 ## Структура проекта
 
@@ -83,7 +91,7 @@ src/
 │       ├── search/            # POST /api/search (AI)
 │       └── dashboard/         # GET /api/dashboard/:venueId
 │
-├── components/                # 12 React-компонентов
+├── components/                # 14 React-компонентов
 │   ├── map/                   # MapView, VenueMarker, HeatmapLayer, MapControls
 │   ├── search/                # SearchBar, SearchResults
 │   ├── venue/                 # VenueCard, VenueDetails

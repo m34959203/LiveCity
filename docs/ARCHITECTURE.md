@@ -83,7 +83,7 @@ livecity/
 │   │       ├── heatmap/route.ts          # GET /api/heatmap
 │   │       ├── search/route.ts           # POST /api/search
 │   │       └── dashboard/[venueId]/route.ts  # GET /api/dashboard/:venueId
-│   ├── components/                # 12 компонентов
+│   ├── components/                # 14 компонентов
 │   │   ├── map/                   # MapView, VenueMarker, HeatmapLayer, MapControls
 │   │   ├── search/                # SearchBar, SearchResults
 │   │   ├── venue/                 # VenueCard, VenueDetails
@@ -199,16 +199,26 @@ NEXT_PUBLIC_DEFAULT_ZOOM=12        # опционально
 
 ---
 
-## 6. CI/CD
+## 6. CI/CD и Production Startup
 
+### GitHub Actions
 ```
-GitHub Actions: .github/workflows/ci.yml
+.github/workflows/ci.yml
 ├── Lint & Typecheck (ESLint + tsc --noEmit)
 ├── Tests (Vitest — 37 тестов)
 └── Build (prisma generate + next build)
 
 Triggers: push main/claude/**, PR to main
 ```
+
+### Production Startup (`scripts/start.mjs`)
+
+Скрипт `npm run start` выполняет:
+1. `prisma db push --skip-generate` — синхронизация схемы БД
+2. Проверка: если БД пустая → автоматический seed (70 заведений)
+3. `next start` — запуск production-сервера
+
+Это позволяет деплоить в один шаг: при первом запуске БД заполняется автоматически.
 
 ---
 

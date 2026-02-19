@@ -180,7 +180,7 @@
 | Фазы | 5 / 5 завершено |
 | API endpoints | 6 |
 | Сервисы | 4 (Venue, Score, AI, Analytics) |
-| Компоненты | 12 |
+| Компоненты | 14 |
 | Страницы | 2 (/, /dashboard) |
 | Тесты | 37 |
 | CI jobs | 3 (Lint, Tests, Build) |
