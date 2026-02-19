@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useReducer } from "react";
+import { useEffect, useReducer } from "react";
 import { LiveScoreBadge } from "@/components/ui/LiveScoreBadge";
 import type { VenueDetail } from "@/types/venue";
 
@@ -36,21 +36,26 @@ function reducer(_state: State, action: Action): State {
 export function VenueDetails({ venueId, onClose }: VenueDetailsProps) {
   const [state, dispatch] = useReducer(reducer, { venue: null, loading: false });
 
-  const loadVenue = useCallback((id: string) => {
-    dispatch({ type: "FETCH_START" });
-    fetch(`/api/venues/${id}`)
-      .then((r) => r.json())
-      .then((res) => dispatch({ type: "FETCH_OK", venue: res.data }))
-      .catch(() => dispatch({ type: "FETCH_ERR" }));
-  }, []);
-
   useEffect(() => {
     if (!venueId) {
       dispatch({ type: "RESET" });
       return;
     }
-    loadVenue(venueId);
-  }, [venueId, loadVenue]);
+
+    const controller = new AbortController();
+    dispatch({ type: "FETCH_START" });
+
+    fetch(`/api/venues/${venueId}`, { signal: controller.signal })
+      .then((r) => r.json())
+      .then((res) => dispatch({ type: "FETCH_OK", venue: res.data }))
+      .catch((err) => {
+        if (err.name !== "AbortError") {
+          dispatch({ type: "FETCH_ERR" });
+        }
+      });
+
+    return () => controller.abort();
+  }, [venueId]);
 
   const { venue, loading } = state;
 
