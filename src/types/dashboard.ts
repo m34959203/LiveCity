@@ -25,6 +25,13 @@ export interface DistrictComparison {
   totalInDistrict: number;
 }
 
+export interface AIAnalysis {
+  summary: string;
+  weakPoints: string[];
+  strongPoints: string[];
+  sentimentTrend: "improving" | "stable" | "declining";
+}
+
 export interface DashboardData {
   venue: {
     id: string;
@@ -38,5 +45,6 @@ export interface DashboardData {
   topComplaints: Complaint[];
   actionPlan: ActionPlanItem[];
   districtComparison: DistrictComparison;
+  aiAnalysis: AIAnalysis | null;
   generatedAt: string;
 }

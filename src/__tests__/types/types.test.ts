@@ -86,6 +86,7 @@ describe("Type contracts", () => {
       topComplaints: [complaint],
       actionPlan: [action],
       districtComparison: comparison,
+      aiAnalysis: { summary: "Хорошее место", weakPoints: [], strongPoints: ["Сервис"], sentimentTrend: "stable" },
       generatedAt: "2026-02-01T00:00:00.000Z",
     };
 

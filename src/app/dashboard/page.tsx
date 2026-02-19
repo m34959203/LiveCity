@@ -298,6 +298,78 @@ function DashboardContent() {
               )}
             </div>
 
+            {/* AI Analysis Card */}
+            {data.aiAnalysis && (
+              <div className="mb-6 rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
+                <div className="mb-3 flex items-center gap-2">
+                  <div className="h-5 w-5 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 p-0.5">
+                    <svg viewBox="0 0 20 20" fill="white" className="h-full w-full">
+                      <path d="M10 2a1 1 0 011 1v1.323l3.954 1.582 1.599-.547a1 1 0 01.64 1.894l-1.04.355L18 10.4a1 1 0 01-1.4 1.368l-.86-.614-3.74 2.494v2.74l1.188.684a1 1 0 01-1 1.732L10 17.68l-2.188 1.124a1 1 0 11-1-1.732L8 16.388v-2.74L4.26 11.155l-.86.614A1 1 0 012 10.4l1.847-2.793-1.04-.355a1 1 0 01.64-1.894l1.599.547L9 4.323V3a1 1 0 011-1z" />
+                    </svg>
+                  </div>
+                  <h3 className="text-sm font-semibold text-white">
+                    AI-анализ
+                  </h3>
+                  <span className={`ml-auto rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                    data.aiAnalysis.sentimentTrend === "improving"
+                      ? "bg-emerald-900/50 text-emerald-400"
+                      : data.aiAnalysis.sentimentTrend === "declining"
+                        ? "bg-red-900/50 text-red-400"
+                        : "bg-zinc-800 text-zinc-400"
+                  }`}>
+                    {data.aiAnalysis.sentimentTrend === "improving"
+                      ? "Улучшается"
+                      : data.aiAnalysis.sentimentTrend === "declining"
+                        ? "Ухудшается"
+                        : "Стабильно"}
+                  </span>
+                </div>
+
+                <p className="mb-4 text-sm text-zinc-300">
+                  {data.aiAnalysis.summary}
+                </p>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {data.aiAnalysis.strongPoints.length > 0 && (
+                    <div>
+                      <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-emerald-500">
+                        Сильные стороны
+                      </p>
+                      <ul className="space-y-1">
+                        {data.aiAnalysis.strongPoints.map((p, i) => (
+                          <li
+                            key={i}
+                            className="flex items-start gap-1.5 text-xs text-zinc-300"
+                          >
+                            <span className="mt-1 h-1 w-1 shrink-0 rounded-full bg-emerald-500" />
+                            {p}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {data.aiAnalysis.weakPoints.length > 0 && (
+                    <div>
+                      <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-amber-500">
+                        Зоны роста
+                      </p>
+                      <ul className="space-y-1">
+                        {data.aiAnalysis.weakPoints.map((p, i) => (
+                          <li
+                            key={i}
+                            className="flex items-start gap-1.5 text-xs text-zinc-300"
+                          >
+                            <span className="mt-1 h-1 w-1 shrink-0 rounded-full bg-amber-500" />
+                            {p}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Dashboard Grid */}
             <div className="grid gap-4 sm:gap-6 md:grid-cols-2">
               {/* Score chart — full width */}
