@@ -3,8 +3,12 @@ import { logger } from "./logger";
 // ============================================
 // Apify 2GIS Places Scraper — Discovery Client
 // ============================================
-// Uses 2GIS Places Scraper on Apify to discover venues.
-// Actor: configured via APIFY_2GIS_PLACES_ACTOR env var
+// Actor: m_mamaev/2gis-places-scraper (ID via APIFY_2GIS_PLACES_ACTOR)
+//
+// Input schema (discovered from build):
+//   query: string[]     — Search queries (e.g. ["рестораны"])
+//   location: string    — City/location name (e.g. "Алматы")
+//   maxItems: number    — Max results to fetch
 //
 // Used by:
 //   - venue-scout CRON (City Radar) — bulk discovery
@@ -28,42 +32,10 @@ export interface TwoGisPlace {
   reviewCount?: number;
 }
 
-// City name → 2GIS URL slug mapping (KZ cities use 2gis.kz)
-const CITY_SLUG_MAP: Record<string, { slug: string; domain: string }> = {
-  Алматы: { slug: "almaty", domain: "2gis.kz" },
-  Астана: { slug: "astana", domain: "2gis.kz" },
-  Караганда: { slug: "karaganda", domain: "2gis.kz" },
-  Шымкент: { slug: "shymkent", domain: "2gis.kz" },
-  Жезказган: { slug: "zhezkazgan", domain: "2gis.kz" },
-  Актобе: { slug: "aktobe", domain: "2gis.kz" },
-  Павлодар: { slug: "pavlodar", domain: "2gis.kz" },
-  Семей: { slug: "semey", domain: "2gis.kz" },
-  Атырау: { slug: "atyrau", domain: "2gis.kz" },
-  Костанай: { slug: "kostanay", domain: "2gis.kz" },
-  Тараз: { slug: "taraz", domain: "2gis.kz" },
-  Уральск: { slug: "uralsk", domain: "2gis.kz" },
-  Петропавловск: { slug: "petropavlovsk", domain: "2gis.kz" },
-  Кызылорда: { slug: "kyzylorda", domain: "2gis.kz" },
-  Темиртау: { slug: "temirtau", domain: "2gis.kz" },
-  Экибастуз: { slug: "ekibastuz", domain: "2gis.kz" },
-};
-
-/** Build a 2GIS search URL for a city + query */
-function build2GisSearchUrl(city: string, query: string): string | null {
-  const mapping = CITY_SLUG_MAP[city];
-  if (!mapping) {
-    logger.warn(`2GIS: no slug mapping for city "${city}"`, {
-      endpoint: "Apify2GisClient.build2GisSearchUrl",
-    });
-    return null;
-  }
-  return `https://${mapping.domain}/${mapping.slug}/search/${encodeURIComponent(query)}`;
-}
-
 export class Apify2GisClient {
   private token: string;
   private actorId: string;
-  private schemaProbed = false;
+  private schemaLogged = false;
 
   constructor() {
     this.token = process.env.APIFY_TOKEN || "";
@@ -73,6 +45,52 @@ export class Apify2GisClient {
   /** Check if Apify 2GIS discovery is configured */
   isConfigured(): boolean {
     return this.token.length > 0 && this.actorId.length > 0;
+  }
+
+  /**
+   * Log the full input schema once (for debugging).
+   * Fetches the actor's build and logs inputSchema in chunks.
+   */
+  private async logSchemaOnce(): Promise<void> {
+    if (this.schemaLogged) return;
+    this.schemaLogged = true;
+
+    try {
+      // Get actor info to find latest build ID
+      const actorRes = await fetch(
+        `https://api.apify.com/v2/acts/${this.actorId}?token=${this.token}`,
+        { signal: AbortSignal.timeout(10_000) },
+      );
+      if (!actorRes.ok) return;
+
+      const raw = await actorRes.json();
+      const actorInfo = raw?.data ?? raw;
+      const buildId = actorInfo?.taggedBuilds?.latest?.buildId;
+      if (!buildId) return;
+
+      // Fetch the build to get full input schema
+      const buildRes = await fetch(
+        `https://api.apify.com/v2/acts/${this.actorId}/builds/${buildId}?token=${this.token}`,
+        { signal: AbortSignal.timeout(10_000) },
+      );
+      if (!buildRes.ok) return;
+
+      const buildRaw = await buildRes.json();
+      const buildData = buildRaw?.data ?? buildRaw;
+      const schema = buildData?.inputSchema ?? "";
+      if (!schema) return;
+
+      const schemaStr = typeof schema === "string" ? schema : JSON.stringify(schema);
+      // Log in chunks of 800 chars to avoid truncation
+      for (let i = 0; i < schemaStr.length; i += 800) {
+        const chunk = schemaStr.slice(i, i + 800);
+        logger.info(`2GIS schema [${i}..${i + chunk.length}]: ${chunk}`, {
+          endpoint: "Apify2GisClient.logSchema",
+        });
+      }
+    } catch {
+      // Schema logging is best-effort
+    }
   }
 
   /**
@@ -87,105 +105,21 @@ export class Apify2GisClient {
     city: string,
     maxItems: number = 20,
   ): Promise<TwoGisPlace[]> {
-    const searchUrl = build2GisSearchUrl(city, query);
-    if (!searchUrl) {
-      return [];
-    }
+    // Log full schema on first call (non-blocking)
+    this.logSchemaOnce().catch(() => {});
 
     try {
-      // Schema probe: discover actor name and input schema (once per process)
-      if (!this.schemaProbed) {
-        this.schemaProbed = true;
-        try {
-          // Fetch actor metadata (Apify wraps response in "data" field)
-          const schemaRes = await fetch(
-            `https://api.apify.com/v2/acts/${this.actorId}?token=${this.token}`,
-            { signal: AbortSignal.timeout(10_000) },
-          );
-          if (schemaRes.ok) {
-            const raw = await schemaRes.json();
-            const actorInfo = raw?.data ?? raw;
-            const actorName = actorInfo?.name ?? "unknown";
-            const actorUsername = actorInfo?.username ?? "unknown";
-
-            // Log exampleRunInput — this shows the expected input format!
-            const exampleInput = JSON.stringify(actorInfo?.exampleRunInput ?? "none").slice(0, 500);
-            logger.info(`2GIS Apify: actor=${actorUsername}/${actorName} | exampleRunInput=${exampleInput}`, {
-              endpoint: "Apify2GisClient.searchPlaces",
-            });
-
-            // Log latest build details for input schema
-            const latestBuild = actorInfo?.taggedBuilds?.latest;
-            if (latestBuild) {
-              const buildId = latestBuild.buildId ?? latestBuild.id ?? "unknown";
-              logger.info(`2GIS Apify: latest buildId=${buildId} | buildKeys=${Object.keys(latestBuild).join(",")}`, {
-                endpoint: "Apify2GisClient.searchPlaces",
-              });
-            }
-
-            // Log versions
-            const versions = actorInfo?.versions;
-            if (Array.isArray(versions) && versions.length > 0) {
-              const latestVersion = versions[versions.length - 1];
-              logger.info(`2GIS Apify: latestVersion=${JSON.stringify(latestVersion).slice(0, 500)}`, {
-                endpoint: "Apify2GisClient.searchPlaces",
-              });
-            }
-
-            // Try fetching the build's input schema directly
-            const buildId = latestBuild?.buildId ?? latestBuild?.id;
-            if (buildId) {
-              const buildRes = await fetch(
-                `https://api.apify.com/v2/acts/${this.actorId}/builds/${buildId}?token=${this.token}`,
-                { signal: AbortSignal.timeout(10_000) },
-              );
-              if (buildRes.ok) {
-                const buildRaw = await buildRes.json();
-                const buildData = buildRaw?.data ?? buildRaw;
-                const buildInputSchema = buildData?.inputSchema ?? buildData?.actInputSchema ?? "no-build-schema";
-                const schemaStr = typeof buildInputSchema === "string" ? buildInputSchema.slice(0, 800) : JSON.stringify(buildInputSchema).slice(0, 800);
-                logger.info(`2GIS Apify: build inputSchema=${schemaStr}`, {
-                  endpoint: "Apify2GisClient.searchPlaces",
-                });
-              }
-            }
-          }
-
-          // Send empty body to discover required fields via validation error
-          logger.info("2GIS Apify: sending empty {} probe...", {
-            endpoint: "Apify2GisClient.searchPlaces",
-          });
-          const probeRes = await fetch(
-            `https://api.apify.com/v2/acts/${this.actorId}/run-sync-get-dataset-items?token=${this.token}`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: "{}",
-              signal: AbortSignal.timeout(30_000),
-            },
-          );
-          const probeBody = await probeRes.text().catch(() => "(no body)");
-          logger.info(`2GIS Apify: probe response | status=${probeRes.status} | body=${probeBody.slice(0, 600)}`, {
-            endpoint: "Apify2GisClient.searchPlaces",
-          });
-        } catch (probeErr) {
-          logger.warn(`2GIS Apify: schema probe error: ${probeErr instanceof Error ? probeErr.message : String(probeErr)}`, {
-            endpoint: "Apify2GisClient.searchPlaces",
-          });
-        }
-        // After probing, skip actual search — just return empty to avoid wasting credits
-        return [];
-      }
-
-      // Actual search request — disabled until we know the correct format
-      // TODO: replace input format once schema is discovered
+      // m_mamaev/2gis-places-scraper input format:
+      //   query: array of search strings
+      //   location: city name (as separate field, NOT in query)
+      //   maxItems: max results
       const input = {
-        startUrls: [{ url: searchUrl }],
-        maxPlaces: maxItems,
-        language: "ru",
+        query: [query],
+        location: city,
+        maxItems,
       };
 
-      logger.info(`2GIS Apify: schema probe with empty input`, {
+      logger.info(`2GIS Apify: search query=["${query}"] location="${city}" maxItems=${maxItems}`, {
         endpoint: "Apify2GisClient.searchPlaces",
       });
 
@@ -204,7 +138,7 @@ export class Apify2GisClient {
         const errorBody = await runRes.text().catch(() => "(no body)");
         logger.warn("2GIS Apify discovery: actor run failed", {
           endpoint: "Apify2GisClient.searchPlaces",
-          error: `${runRes.status} ${runRes.statusText} | url=${searchUrl} | body=${errorBody.slice(0, 400)}`,
+          error: `${runRes.status} ${runRes.statusText} | body=${errorBody.slice(0, 400)}`,
         });
         return [];
       }
@@ -214,15 +148,21 @@ export class Apify2GisClient {
       if (!Array.isArray(items) || items.length === 0) {
         logger.info("2GIS Apify discovery: no results", {
           endpoint: "Apify2GisClient.searchPlaces",
-          searchUrl,
         });
         return [];
       }
 
-      logger.info(`2GIS Apify: got ${items.length} raw items`, {
+      logger.info(`2GIS Apify: got ${items.length} raw items for "${query}" in ${city}`, {
         endpoint: "Apify2GisClient.searchPlaces",
-        searchUrl,
       });
+
+      // Log first item keys for output schema debugging
+      if (items.length > 0) {
+        const firstItem = items[0];
+        logger.info(`2GIS Apify: first item keys=${Object.keys(firstItem).join(",")} | sample=${JSON.stringify(firstItem).slice(0, 500)}`, {
+          endpoint: "Apify2GisClient.searchPlaces",
+        });
+      }
 
       return items
         .filter((item) => item.name && (item.address || item.location || item.address_name))
