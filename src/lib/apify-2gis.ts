@@ -97,21 +97,34 @@ export class Apify2GisClient {
       if (!this.schemaProbed) {
         this.schemaProbed = true;
         try {
+          // Fetch actor metadata (Apify wraps response in "data" field)
           const schemaRes = await fetch(
             `https://api.apify.com/v2/acts/${this.actorId}?token=${this.token}`,
             { signal: AbortSignal.timeout(10_000) },
           );
           if (schemaRes.ok) {
-            const actorInfo = await schemaRes.json();
-            const schemaStr = JSON.stringify(actorInfo?.taggedBuilds?.latest?.inputSchema ?? actorInfo?.versions ?? "no-schema").slice(0, 800);
+            const raw = await schemaRes.json();
+            const actorInfo = raw?.data ?? raw;
             const actorName = actorInfo?.name ?? "unknown";
             const actorUsername = actorInfo?.username ?? "unknown";
+            // Try to find input schema in builds or versions
+            const inputSchema = actorInfo?.taggedBuilds?.latest?.inputSchema
+              ?? actorInfo?.versions?.[0]?.inputSchema
+              ?? "no-schema";
+            const schemaStr = typeof inputSchema === "string" ? inputSchema.slice(0, 800) : JSON.stringify(inputSchema).slice(0, 800);
             logger.info(`2GIS Apify: actor=${actorUsername}/${actorName} | schema=${schemaStr}`, {
+              endpoint: "Apify2GisClient.searchPlaces",
+            });
+            // Log raw keys for debugging
+            logger.info(`2GIS Apify: actorInfo keys=${Object.keys(actorInfo).join(",")} | id=${actorInfo?.id}`, {
               endpoint: "Apify2GisClient.searchPlaces",
             });
           }
 
           // Send empty body to discover required fields via validation error
+          logger.info("2GIS Apify: sending empty {} probe...", {
+            endpoint: "Apify2GisClient.searchPlaces",
+          });
           const probeRes = await fetch(
             `https://api.apify.com/v2/acts/${this.actorId}/run-sync-get-dataset-items?token=${this.token}`,
             {
@@ -121,20 +134,21 @@ export class Apify2GisClient {
               signal: AbortSignal.timeout(30_000),
             },
           );
-          if (!probeRes.ok) {
-            const probeBody = await probeRes.text().catch(() => "(no body)");
-            logger.info(`2GIS Apify: schema probe result | ${probeRes.status} | ${probeBody.slice(0, 600)}`, {
-              endpoint: "Apify2GisClient.searchPlaces",
-            });
-          }
+          const probeBody = await probeRes.text().catch(() => "(no body)");
+          logger.info(`2GIS Apify: probe response | status=${probeRes.status} | body=${probeBody.slice(0, 600)}`, {
+            endpoint: "Apify2GisClient.searchPlaces",
+          });
         } catch (probeErr) {
           logger.warn(`2GIS Apify: schema probe error: ${probeErr instanceof Error ? probeErr.message : String(probeErr)}`, {
             endpoint: "Apify2GisClient.searchPlaces",
           });
         }
+        // After probing, skip actual search — just return empty to avoid wasting credits
+        return [];
       }
 
-      // Actual search request (using startUrls until we know the correct format)
+      // Actual search request — disabled until we know the correct format
+      // TODO: replace input format once schema is discovered
       const input = {
         startUrls: [{ url: searchUrl }],
         maxPlaces: maxItems,
