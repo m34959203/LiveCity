@@ -44,6 +44,42 @@ function reducer(_state: State, action: Action): State {
 const trendLabel = { rising: "Растёт", stable: "Стабильно", declining: "Падает" };
 const trendColor = { rising: "text-emerald-400", stable: "text-zinc-400", declining: "text-red-400" };
 
+/** Source badge config: icon (SVG path), label, color */
+const sourceConfig: Record<string, { icon: string; label: string; color: string }> = {
+  google: {
+    icon: "M12.545 10.239v3.821h5.445c-.712 2.315-2.647 3.972-5.445 3.972a6.033 6.033 0 110-12.064c1.498 0 2.866.549 3.921 1.453l2.814-2.814A9.969 9.969 0 0012.545 2C7.021 2 2.543 6.477 2.543 12s4.478 10 10.002 10c8.396 0 10.249-7.85 9.426-11.748l-9.426-.013z",
+    label: "Google",
+    color: "text-blue-400",
+  },
+  "2gis": {
+    icon: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z",
+    label: "2GIS",
+    color: "text-green-400",
+  },
+  instagram: {
+    icon: "M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z",
+    label: "Instagram",
+    color: "text-pink-400",
+  },
+  manual: {
+    icon: "M16 4H18V6H20V8H18V10H16V8H14V6H16V4M12 14C9.24 14 4 15.38 4 18.13V20H20V18.13C20 15.38 14.76 14 12 14M12 12C14.21 12 16 10.21 16 8S14.21 4 12 4 8 5.79 8 8 9.79 12 12 12Z",
+    label: "Вручную",
+    color: "text-zinc-400",
+  },
+};
+
+function SourceBadge({ source }: { source: string }) {
+  const config = sourceConfig[source] || sourceConfig.manual;
+  return (
+    <span className={`inline-flex items-center gap-1 ${config.color}`}>
+      <svg viewBox="0 0 24 24" fill="currentColor" className="h-3 w-3">
+        <path d={config.icon} />
+      </svg>
+      <span>{config.label}</span>
+    </span>
+  );
+}
+
 export function VenueDetails({ venueId, onClose }: VenueDetailsProps) {
   const [state, dispatch] = useReducer(reducer, {
     venue: null,
@@ -219,7 +255,7 @@ export function VenueDetails({ venueId, onClose }: VenueDetailsProps) {
                   <div key={i} className="rounded-lg bg-zinc-900 p-3">
                     <p className="text-sm text-zinc-300">{r.text}</p>
                     <div className="mt-1 flex items-center gap-2 text-xs text-zinc-500">
-                      <span>{r.source}</span>
+                      <SourceBadge source={r.source} />
                       <span
                         className={
                           r.sentiment > 0.3

@@ -20,10 +20,13 @@ model Venue {
   address       String
   latitude      Float
   longitude     Float
-  phone         String?
-  whatsapp      String?
-  googlePlaceId String?  @map("google_place_id")
-  photoUrls     String[] @map("photo_urls")
+  phone           String?
+  whatsapp        String?
+  googlePlaceId   String?  @map("google_place_id")
+  twoGisId        String?  @map("two_gis_id")
+  twoGisUrl       String?  @map("two_gis_url")
+  instagramHandle String?  @map("instagram_handle")
+  photoUrls       String[] @map("photo_urls")
   workingHours  Json?    @map("working_hours")
   liveScore     Float    @default(0) @map("live_score")
   isActive      Boolean  @default(true) @map("is_active")
@@ -118,6 +121,7 @@ model Review {
   venue   Venue  @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
   @@index([venueId, createdAt])
+  @@index([venueId, source])
   @@index([sentiment])
   @@map("reviews")
 }

@@ -4,15 +4,19 @@ import { GooglePlacesClient, type GoogleReview } from "@/lib/google-places";
 import { geminiModel } from "@/lib/gemini";
 
 // ============================================
-// Social Signal Service — REAL data collection
+// Social Signal Service — Multi-source collection
 // ============================================
 // Collects social signals from:
 //   1. Google Places API — reviews, ratings, review count
-//   2. Gemini AI — sentiment analysis on review texts
+//   2. 2GIS — reviews via Apify scraper (when configured)
+//   3. Instagram — mentions via Apify scraper (when configured)
+//   4. Gemini AI — sentiment analysis on review texts
 //
 // Architecture: each source is a private method.
-// To add Instagram/TikTok later: add a new collectXxx method
-// and call it from collectSignals().
+// Enable sources by setting env vars:
+//   GOOGLE_PLACES_API_KEY — Google reviews
+//   APIFY_TOKEN + APIFY_2GIS_ACTOR — 2GIS reviews
+//   APIFY_TOKEN + APIFY_INSTA_ACTOR — Instagram mentions
 // ============================================
 
 interface SocialPulse {
@@ -28,6 +32,9 @@ interface VenueForCollection {
   latitude: number;
   longitude: number;
   googlePlaceId: string | null;
+  twoGisId: string | null;
+  twoGisUrl: string | null;
+  instagramHandle: string | null;
 }
 
 const googleClient = new GooglePlacesClient();
@@ -45,6 +52,9 @@ export class SocialSignalService {
         latitude: true,
         longitude: true,
         googlePlaceId: true,
+        twoGisId: true,
+        twoGisUrl: true,
+        instagramHandle: true,
       },
     });
     if (!venue) return;
@@ -58,9 +68,15 @@ export class SocialSignalService {
       });
     }
 
-    // Future sources:
-    // if (instagramClient.isConfigured()) await this.collectInstagramSignals(venue);
-    // if (tiktokClient.isConfigured()) await this.collectTikTokSignals(venue);
+    // 2GIS — reviews via Apify scraper
+    if (process.env.APIFY_TOKEN && process.env.APIFY_2GIS_ACTOR && venue.twoGisUrl) {
+      await this.collect2GisSignals(venue);
+    }
+
+    // Instagram — mentions via Apify scraper
+    if (process.env.APIFY_TOKEN && process.env.APIFY_INSTA_ACTOR && venue.instagramHandle) {
+      await this.collectInstagramSignals(venue);
+    }
   }
 
   // ------------------------------------------
@@ -75,6 +91,9 @@ export class SocialSignalService {
         latitude: true,
         longitude: true,
         googlePlaceId: true,
+        twoGisId: true,
+        twoGisUrl: true,
+        instagramHandle: true,
       },
     });
 
@@ -188,6 +207,324 @@ export class SocialSignalService {
         `rating ${details.rating}, total ${details.user_ratings_total}`,
       { endpoint: "SocialSignalService.collectGoogleSignals" },
     );
+  }
+
+  // ------------------------------------------
+  // 2GIS: Reviews via Apify scraper
+  // ------------------------------------------
+
+  /**
+   * Collect reviews from 2GIS via Apify actor.
+   * Requires: APIFY_TOKEN + APIFY_2GIS_ACTOR env vars.
+   *
+   * How it works:
+   * 1. Calls Apify 2GIS scraper with venue's twoGisUrl
+   * 2. Gets reviews with text, rating, author
+   * 3. Runs sentiment analysis via Gemini
+   * 4. Stores in DB with source="2gis"
+   */
+  private static async collect2GisSignals(
+    venue: VenueForCollection,
+  ): Promise<void> {
+    if (!venue.twoGisUrl) return;
+
+    try {
+      const token = process.env.APIFY_TOKEN;
+      const actorId = process.env.APIFY_2GIS_ACTOR;
+
+      // Start Apify actor run
+      const runRes = await fetch(
+        `https://api.apify.com/v2/acts/${actorId}/runs?token=${token}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            startUrls: [{ url: venue.twoGisUrl }],
+            maxReviews: 10,
+            language: "ru",
+          }),
+          signal: AbortSignal.timeout(30_000),
+        },
+      );
+
+      if (!runRes.ok) {
+        logger.warn("2GIS Apify actor start failed", {
+          endpoint: "SocialSignalService.collect2GisSignals",
+          error: `${runRes.status}`,
+        });
+        return;
+      }
+
+      const runData = await runRes.json();
+      const runId = runData.data?.id;
+      const datasetId = runData.data?.defaultDatasetId;
+      if (!runId || !datasetId) return;
+
+      // Poll for completion (max 2 min, check every 10s)
+      const maxWait = 120_000;
+      const pollInterval = 10_000;
+      const startTime = Date.now();
+
+      while (Date.now() - startTime < maxWait) {
+        await new Promise((resolve) => setTimeout(resolve, pollInterval));
+
+        const statusRes = await fetch(
+          `https://api.apify.com/v2/actor-runs/${runId}?token=${token}`,
+          { signal: AbortSignal.timeout(10_000) },
+        );
+        if (!statusRes.ok) continue;
+
+        const statusData = await statusRes.json();
+        const status = statusData.data?.status;
+        if (status === "SUCCEEDED") break;
+        if (status === "FAILED" || status === "ABORTED" || status === "TIMED-OUT") {
+          logger.warn(`2GIS Apify run ${status}`, {
+            endpoint: "SocialSignalService.collect2GisSignals",
+          });
+          return;
+        }
+      }
+
+      // Fetch results
+      const dataRes = await fetch(
+        `https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&format=json`,
+        { signal: AbortSignal.timeout(10_000) },
+      );
+
+      if (!dataRes.ok) return;
+
+      const items: { text?: string; rating?: number; author?: string; date?: string }[] =
+        await dataRes.json();
+
+      // Filter new reviews
+      const existingReviews = await prisma.review.findMany({
+        where: { venueId: venue.id, source: "2gis" },
+        select: { authorName: true, text: true },
+      });
+      const existingKeys = new Set(
+        existingReviews.map((r) => `${r.authorName}::${r.text?.slice(0, 50)}`),
+      );
+
+      const newReviews = items.filter(
+        (r) =>
+          r.text &&
+          r.text.length > 5 &&
+          !existingKeys.has(`${r.author || "Гость"}::${r.text.slice(0, 50)}`),
+      );
+
+      if (newReviews.length === 0) return;
+
+      // Sentiment analysis
+      const sentiments = await this.batchAnalyzeSentiment(
+        newReviews.map((r) => ({
+          author_name: r.author || "Гость",
+          rating: r.rating || 3,
+          text: r.text || "",
+          time: Date.now() / 1000,
+          language: "ru",
+          relative_time_description: "",
+        })),
+      );
+
+      let sentimentSum = 0;
+      for (let i = 0; i < newReviews.length; i++) {
+        const review = newReviews[i];
+        const sentiment = sentiments[i] ?? 0;
+        sentimentSum += sentiment;
+
+        await prisma.review.create({
+          data: {
+            venueId: venue.id,
+            text: review.text!,
+            sentiment,
+            source: "2gis",
+            rating: review.rating || null,
+            authorName: review.author || "Гость",
+          },
+        });
+      }
+
+      await prisma.socialSignal.create({
+        data: {
+          venueId: venue.id,
+          source: "2gis",
+          mentionCount: newReviews.length,
+          sentimentAvg: Math.round((sentimentSum / newReviews.length) * 100) / 100,
+        },
+      });
+
+      logger.info(
+        `2GIS signals: "${venue.name}" — ${newReviews.length} new reviews`,
+        { endpoint: "SocialSignalService.collect2GisSignals" },
+      );
+    } catch (error) {
+      logger.error("2GIS signal collection failed", {
+        endpoint: "SocialSignalService.collect2GisSignals",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  // ------------------------------------------
+  // INSTAGRAM: Mentions via apify/instagram-scraper
+  // ------------------------------------------
+
+  /**
+   * Collect Instagram signals via `apify/instagram-scraper` actor.
+   * Actor ID: shu8hvrXbJbY3Eb9W (apify/instagram-scraper)
+   * Pricing: from $1.50 / 1,000 results
+   *
+   * Input: { directUrls, resultsType, resultsLimit, onlyPostsNewerThan }
+   * Output: { caption, likesCount, commentsCount, timestamp, ownerUsername, ... }
+   *   - likesCount = -1 means author hid like count
+   *
+   * What we extract:
+   * - Posts from venue's Instagram profile (last 7 days)
+   * - Engagement (likes + comments * 3) → mentionCount for Live Score
+   * - Captions → Gemini sentiment analysis
+   */
+  private static async collectInstagramSignals(
+    venue: VenueForCollection,
+  ): Promise<void> {
+    if (!venue.instagramHandle) return;
+
+    try {
+      const token = process.env.APIFY_TOKEN;
+      const actorId = process.env.APIFY_INSTA_ACTOR || "apify/instagram-scraper";
+
+      // Only fetch posts from the last 7 days
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      const profileUrl = `https://www.instagram.com/${venue.instagramHandle.replace("@", "")}/`;
+
+      // 1. Start actor run
+      const runRes = await fetch(
+        `https://api.apify.com/v2/acts/${actorId}/runs?token=${token}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            directUrls: [profileUrl],
+            resultsType: "posts",
+            resultsLimit: 20,
+            onlyPostsNewerThan: sevenDaysAgo.toISOString(),
+          }),
+          signal: AbortSignal.timeout(30_000),
+        },
+      );
+
+      if (!runRes.ok) {
+        logger.warn("Instagram Apify actor start failed", {
+          endpoint: "SocialSignalService.collectInstagramSignals",
+          error: `${runRes.status}`,
+        });
+        return;
+      }
+
+      const runData = await runRes.json();
+      const runId = runData.data?.id;
+      const datasetId = runData.data?.defaultDatasetId;
+      if (!runId || !datasetId) return;
+
+      // 2. Poll for completion (max 2 min, check every 10s)
+      const maxWait = 120_000;
+      const pollInterval = 10_000;
+      const startTime = Date.now();
+
+      while (Date.now() - startTime < maxWait) {
+        await new Promise((resolve) => setTimeout(resolve, pollInterval));
+
+        const statusRes = await fetch(
+          `https://api.apify.com/v2/actor-runs/${runId}?token=${token}`,
+          { signal: AbortSignal.timeout(10_000) },
+        );
+        if (!statusRes.ok) continue;
+
+        const statusData = await statusRes.json();
+        const status = statusData.data?.status;
+        if (status === "SUCCEEDED") break;
+        if (status === "FAILED" || status === "ABORTED" || status === "TIMED-OUT") {
+          logger.warn(`Instagram Apify run ${status}`, {
+            endpoint: "SocialSignalService.collectInstagramSignals",
+          });
+          return;
+        }
+      }
+
+      // 3. Fetch results from dataset
+      const dataRes = await fetch(
+        `https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&format=json`,
+        { signal: AbortSignal.timeout(10_000) },
+      );
+
+      if (!dataRes.ok) return;
+
+      interface InstaPost {
+        caption?: string;
+        likesCount?: number;
+        commentsCount?: number;
+        timestamp?: string;
+        ownerUsername?: string;
+        type?: string;    // "Image", "Video", "Sidecar" (carousel)
+        videoViewCount?: number;
+      }
+
+      const posts: InstaPost[] = await dataRes.json();
+
+      if (posts.length === 0) return;
+
+      // 4. Calculate engagement (likesCount = -1 means hidden, treat as 0)
+      const totalEngagement = posts.reduce((sum, p) => {
+        const likes = (p.likesCount ?? 0) > 0 ? p.likesCount! : 0;
+        const comments = (p.commentsCount ?? 0) * 3; // Comments weighted 3x
+        const views = Math.floor((p.videoViewCount ?? 0) / 10); // Video views weighted 1/10
+        return sum + likes + comments + views;
+      }, 0);
+
+      // 5. Sentiment analysis on captions
+      const captions = posts
+        .map((p) => p.caption)
+        .filter((c): c is string => !!c && c.length > 5);
+
+      let avgSentiment = 0.3; // Instagram skews positive by nature
+      if (captions.length > 0) {
+        const sentiments = await this.batchAnalyzeSentiment(
+          captions.map((text) => ({
+            author_name: venue.instagramHandle || "instagram",
+            rating: 4,
+            text,
+            time: Date.now() / 1000,
+            language: "ru",
+            relative_time_description: "",
+          })),
+        );
+        avgSentiment =
+          sentiments.reduce((a, b) => a + b, 0) / sentiments.length;
+      }
+
+      // 6. Normalize engagement → mention count
+      //    ~100 engagement ≈ 1 "mention" in our system
+      const mentionCount = Math.max(1, Math.round(totalEngagement / 100));
+
+      await prisma.socialSignal.create({
+        data: {
+          venueId: venue.id,
+          source: "instagram",
+          mentionCount,
+          sentimentAvg: Math.round(avgSentiment * 100) / 100,
+        },
+      });
+
+      logger.info(
+        `Instagram signals: "${venue.name}" — ${posts.length} posts, ` +
+          `${totalEngagement} engagement, sentiment ${avgSentiment.toFixed(2)}`,
+        { endpoint: "SocialSignalService.collectInstagramSignals" },
+      );
+    } catch (error) {
+      logger.error("Instagram signal collection failed", {
+        endpoint: "SocialSignalService.collectInstagramSignals",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   // ------------------------------------------

@@ -6,6 +6,7 @@ import { logger } from "./logger";
 // Uses the Places API (legacy) for:
 // - Find Place From Text → resolve venue name to placeId
 // - Place Details → fetch reviews, rating, total reviews
+// - Text Search → discover new venues by query + location
 //
 // API key: https://console.cloud.google.com/apis/credentials
 // Enable: "Places API" in Google Cloud Console
@@ -29,6 +30,18 @@ export interface PlaceDetails {
   rating: number;
   user_ratings_total: number;
   reviews: GoogleReview[];
+}
+
+/** Result from Text Search API — one discovered place */
+export interface TextSearchResult {
+  place_id: string;
+  name: string;
+  formatted_address: string;
+  latitude: number;
+  longitude: number;
+  types: string[];
+  rating?: number;
+  user_ratings_total?: number;
 }
 
 export class GooglePlacesClient {
@@ -91,6 +104,72 @@ export class GooglePlacesClient {
         error: error instanceof Error ? error.message : String(error),
       });
       return null;
+    }
+  }
+
+  /**
+   * Text Search: discover venues by query + location.
+   * Used by venue-scout (City Radar) and lazy discovery.
+   * Returns up to 20 results per call (Google API limit).
+   */
+  async textSearch(
+    query: string,
+    lat: number,
+    lng: number,
+    radius: number = 5000,
+  ): Promise<TextSearchResult[]> {
+    try {
+      const params = new URLSearchParams({
+        query,
+        location: `${lat},${lng}`,
+        radius: String(radius),
+        language: "ru",
+        key: this.apiKey,
+      });
+
+      const res = await fetch(
+        `${BASE_URL}/textsearch/json?${params}`,
+        { signal: AbortSignal.timeout(15_000) },
+      );
+
+      if (!res.ok) {
+        logger.error("Google Places textSearch HTTP error", {
+          endpoint: "GooglePlacesClient.textSearch",
+          error: `${res.status} ${res.statusText}`,
+        });
+        return [];
+      }
+
+      const data = await res.json();
+
+      if (data.status !== "OK" || !data.results?.length) {
+        logger.warn("Google Places textSearch: no results", {
+          endpoint: "GooglePlacesClient.textSearch",
+          error: `status=${data.status}, query="${query}"`,
+        });
+        return [];
+      }
+
+      return data.results.map(
+        (r: Record<string, unknown>) => ({
+          place_id: r.place_id as string,
+          name: r.name as string,
+          formatted_address: (r.formatted_address as string) ?? "",
+          latitude:
+            (r.geometry as { location: { lat: number } })?.location?.lat ?? 0,
+          longitude:
+            (r.geometry as { location: { lng: number } })?.location?.lng ?? 0,
+          types: (r.types as string[]) ?? [],
+          rating: r.rating as number | undefined,
+          user_ratings_total: r.user_ratings_total as number | undefined,
+        }),
+      );
+    } catch (error) {
+      logger.error("Google Places textSearch failed", {
+        endpoint: "GooglePlacesClient.textSearch",
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return [];
     }
   }
 

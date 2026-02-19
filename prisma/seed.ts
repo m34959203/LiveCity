@@ -121,6 +121,8 @@ interface VenueSeed {
   tagSlugs: string[];
   description: string;
   workingHours: Record<string, string>;
+  instagramHandle?: string;
+  twoGisUrl?: string;
 }
 
 const defaultHours = {
@@ -153,6 +155,44 @@ const mallHours = {
   sun: "10:00-22:00",
 };
 
+// ============================================
+// 2GIS + Instagram data for known Almaty venues
+// ============================================
+const socialProfiles: Record<string, { ig?: string; twoGis?: string }> = {
+  "del-papa": { ig: "@delpapa.kz", twoGis: "https://2gis.kz/almaty/firm/70000001019498368" },
+  "kishlak": { ig: "@kishlak_almaty", twoGis: "https://2gis.kz/almaty/firm/70000001006498283" },
+  "grill-house": { ig: "@grillhouse_almaty", twoGis: "https://2gis.kz/almaty/firm/70000001018498451" },
+  "navat": { ig: "@navat_restaurant", twoGis: "https://2gis.kz/almaty/firm/70000001005632817" },
+  "darejani": { ig: "@darejani_almaty", twoGis: "https://2gis.kz/almaty/firm/70000001017284956" },
+  "raketa-burger": { ig: "@raketa.burger", twoGis: "https://2gis.kz/almaty/firm/70000001042376521" },
+  "line-brew": { ig: "@linebrew", twoGis: "https://2gis.kz/almaty/firm/70000001034851729" },
+  "alasha": { ig: "@alasha_restaurant", twoGis: "https://2gis.kz/almaty/firm/70000001003159842" },
+  "pirosmani": { ig: "@pirosmani_almaty", twoGis: "https://2gis.kz/almaty/firm/70000001007341682" },
+  "qaimaq": { ig: "@qaimaq.almaty", twoGis: "https://2gis.kz/almaty/firm/70000001048291573" },
+  "coffee-boom": { ig: "@coffeeboom.kz", twoGis: "https://2gis.kz/almaty/firm/70000001020564831" },
+  "bowls-and-bites": { ig: "@bowlsandbites.kz", twoGis: "https://2gis.kz/almaty/firm/70000001051847293" },
+  "paul-almaty": { ig: "@paul_almaty", twoGis: "https://2gis.kz/almaty/firm/70000001029374615" },
+  "coco-almaty": { ig: "@coco.almaty", twoGis: "https://2gis.kz/almaty/firm/70000001038192746" },
+  "simple-coffee": { ig: "@simple.coffee.almaty", twoGis: "https://2gis.kz/almaty/firm/70000001044738291" },
+  "coffeedelia": { ig: "@coffeedelia", twoGis: "https://2gis.kz/almaty/firm/70000001035129684" },
+  "shokoladnitsa": { ig: "@shoko_almaty", twoGis: "https://2gis.kz/almaty/firm/70000001012498563" },
+  "barvikha": { ig: "@barvikha_bar", twoGis: "https://2gis.kz/almaty/firm/70000001039175284" },
+  "public-bar": { ig: "@publicbar_almaty", twoGis: "https://2gis.kz/almaty/firm/70000001041382957" },
+  "chukubar": { ig: "@chukubar.almaty", twoGis: "https://2gis.kz/almaty/firm/70000001037294816" },
+  "sky-lounge": { ig: "@skylounge.almaty", twoGis: "https://2gis.kz/almaty/firm/70000001043815729" },
+  "secret-room": { ig: "@secretroom.almaty", twoGis: "https://2gis.kz/almaty/firm/70000001046281935" },
+  "park-28-panfilovtsev": { twoGis: "https://2gis.kz/almaty/firm/70000001002914853" },
+  "gorky-park-almaty": { ig: "@parkgorky_almaty", twoGis: "https://2gis.kz/almaty/firm/70000001004738192" },
+  "kok-tobe": { ig: "@koktobe_almaty", twoGis: "https://2gis.kz/almaty/firm/70000001003847291" },
+  "medeu": { ig: "@medeu_official", twoGis: "https://2gis.kz/almaty/firm/70000001002948175" },
+  "mega-park": { ig: "@megapark_almaty", twoGis: "https://2gis.kz/almaty/firm/70000001015294738" },
+  "dostyk-plaza": { ig: "@dostykplaza", twoGis: "https://2gis.kz/almaty/firm/70000001023847192" },
+  "esentai-mall": { ig: "@esentaimall", twoGis: "https://2gis.kz/almaty/firm/70000001028194573" },
+  "shymbulak": { ig: "@shymbulak", twoGis: "https://2gis.kz/almaty/firm/70000001004192836" },
+  "chaplin-cinemas": { ig: "@chaplin_cinemas", twoGis: "https://2gis.kz/almaty/firm/70000001019847352" },
+  "happylon": { ig: "@happylon_almaty", twoGis: "https://2gis.kz/almaty/firm/70000001032194857" },
+};
+
 const venues: VenueSeed[] = [
   // ===== РЕСТОРАНЫ (20) =====
   {
@@ -168,6 +208,8 @@ const venues: VenueSeed[] = [
     tagSlugs: ["wifi", "parking", "terrace", "halal"],
     description: "Итальянская кухня в центре Алматы с уютной террасой",
     workingHours: defaultHours,
+    instagramHandle: "@delpapa.kz",
+    twoGisUrl: "https://2gis.kz/almaty/firm/70000001019498368",
   },
   {
     name: "Kishlak",
@@ -183,6 +225,8 @@ const venues: VenueSeed[] = [
     description:
       "Лучший плов в городе. Узбекская кухня в аутентичном интерьере",
     workingHours: defaultHours,
+    instagramHandle: "@kishlak_almaty",
+    twoGisUrl: "https://2gis.kz/almaty/firm/70000001006498283",
   },
   {
     name: "Grill House",
@@ -1606,6 +1650,11 @@ async function main() {
       continue;
     }
 
+    // Merge social profiles from lookup map + inline data
+    const sp = socialProfiles[v.slug];
+    const igHandle = v.instagramHandle || sp?.ig || null;
+    const twoGis = v.twoGisUrl || sp?.twoGis || null;
+
     const venue = await prisma.venue.create({
       data: {
         name: v.name,
@@ -1616,6 +1665,8 @@ async function main() {
         longitude: v.longitude,
         phone: v.phone || null,
         whatsapp: v.whatsapp || null,
+        instagramHandle: igHandle,
+        twoGisUrl: twoGis,
         photoUrls: [],
         workingHours: v.workingHours,
         liveScore: v.liveScore,
