@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { Suspense, useEffect, useState, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { LiveScoreBadge } from "@/components/ui/LiveScoreBadge";
@@ -62,6 +62,14 @@ function DashboardSkeleton() {
 }
 
 export default function DashboardPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-zinc-950"><DashboardSkeleton /></div>}>
+      <DashboardContent />
+    </Suspense>
+  );
+}
+
+function DashboardContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [data, setData] = useState<DashboardData | null>(null);
