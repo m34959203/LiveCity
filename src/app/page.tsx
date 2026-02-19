@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import dynamic from "next/dynamic";
 import { Header } from "@/components/layout/Header";
 import { SearchBar } from "@/components/search/SearchBar";
 import { SearchResults } from "@/components/search/SearchResults";
 import { VenueDetails } from "@/components/venue/VenueDetails";
+import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
+import { CategoryFilter } from "@/components/map/CategoryFilter";
 import type { VenueListItem } from "@/types/venue";
 import type { SearchResultItem } from "@/types/search";
 
@@ -30,6 +32,7 @@ export default function Home() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [showSearchResults, setShowSearchResults] = useState(false);
   const [venuesError, setVenuesError] = useState(false);
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
 
   // Load venues
   useEffect(() => {
@@ -38,6 +41,12 @@ export default function Home() {
       .then((res) => setVenues(res.data || []))
       .catch(() => setVenuesError(true));
   }, []);
+
+  // Filter venues by category
+  const filteredVenues = useMemo(() => {
+    if (!activeCategory) return venues;
+    return venues.filter((v) => v.category.slug === activeCategory);
+  }, [venues, activeCategory]);
 
   // Close panels on Escape
   useEffect(() => {
@@ -84,6 +93,12 @@ export default function Home() {
       {/* Search */}
       <SearchBar onSearch={handleSearch} isLoading={searchLoading} />
 
+      {/* Category Filter */}
+      <CategoryFilter
+        activeCategory={activeCategory}
+        onCategoryChange={setActiveCategory}
+      />
+
       {/* Search Results */}
       {showSearchResults && (
         <SearchResults
@@ -99,11 +114,13 @@ export default function Home() {
       )}
 
       {/* Map */}
-      <MapView
-        venues={venues}
-        onVenueClick={handleVenueClick}
-        selectedVenueId={selectedVenueId}
-      />
+      <ErrorBoundary>
+        <MapView
+          venues={filteredVenues}
+          onVenueClick={handleVenueClick}
+          selectedVenueId={selectedVenueId}
+        />
+      </ErrorBoundary>
 
       {/* Venue Details Panel */}
       <VenueDetails

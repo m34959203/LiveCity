@@ -1,8 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { VenueService } from "@/services/venue.service";
+import { logger } from "@/lib/logger";
+import { rateLimit, getRateLimitKey } from "@/lib/rate-limit";
 import type { VenueFilters } from "@/types/venue";
 
 export async function GET(request: NextRequest) {
+  const ip = getRateLimitKey(request);
+  const { allowed, remaining } = rateLimit(ip, 60);
+  if (!allowed) {
+    return NextResponse.json(
+      { error: { code: "RATE_LIMIT", message: "Too many requests" } },
+      {
+        status: 429,
+        headers: { "Retry-After": "60", "X-RateLimit-Remaining": "0" },
+      },
+    );
+  }
+
   try {
     const { searchParams } = request.nextUrl;
 
@@ -29,18 +43,34 @@ export async function GET(request: NextRequest) {
     if (tag) filters.tag = tag;
 
     const minScore = searchParams.get("minScore");
-    if (minScore) filters.minScore = Number(minScore);
+    if (minScore && !isNaN(Number(minScore))) {
+      filters.minScore = Number(minScore);
+    }
 
     const limit = searchParams.get("limit");
-    if (limit) filters.limit = Math.min(Number(limit), 200);
+    if (limit && !isNaN(Number(limit))) {
+      filters.limit = Math.min(Number(limit), 200);
+    }
 
     const offset = searchParams.get("offset");
-    if (offset) filters.offset = Number(offset);
+    if (offset && !isNaN(Number(offset))) {
+      filters.offset = Number(offset);
+    }
 
     const result = await VenueService.getAll(filters);
-    return NextResponse.json(result);
+
+    const response = NextResponse.json(result);
+    response.headers.set(
+      "Cache-Control",
+      "public, max-age=30, stale-while-revalidate=60",
+    );
+    response.headers.set("X-RateLimit-Remaining", String(remaining));
+    return response;
   } catch (error) {
-    console.error("GET /api/venues error:", error);
+    logger.error("GET /api/venues failed", {
+      endpoint: "/api/venues",
+      error: error instanceof Error ? error.message : String(error),
+    });
     return NextResponse.json(
       { error: { code: "INTERNAL_ERROR", message: "Internal server error" } },
       { status: 500 },

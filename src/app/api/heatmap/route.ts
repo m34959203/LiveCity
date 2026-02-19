@@ -1,7 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { logger } from "@/lib/logger";
+import { rateLimit, getRateLimitKey } from "@/lib/rate-limit";
 
 export async function GET(request: NextRequest) {
+  const ip = getRateLimitKey(request);
+  const { allowed } = rateLimit(ip, 60);
+  if (!allowed) {
+    return NextResponse.json(
+      { error: { code: "RATE_LIMIT", message: "Too many requests" } },
+      { status: 429, headers: { "Retry-After": "60" } },
+    );
+  }
+
   try {
     const { searchParams } = request.nextUrl;
 
@@ -17,7 +28,8 @@ export async function GET(request: NextRequest) {
     }
 
     const resolution = searchParams.get("resolution") || "low";
-    const precision = resolution === "high" ? 4 : resolution === "medium" ? 3 : 2;
+    const precision =
+      resolution === "high" ? 4 : resolution === "medium" ? 3 : 2;
 
     const venues = await prisma.venue.findMany({
       where,
@@ -56,9 +68,17 @@ export async function GET(request: NextRequest) {
       venueCount: b.count,
     }));
 
-    return NextResponse.json({ data: { points } });
+    const response = NextResponse.json({ data: { points } });
+    response.headers.set(
+      "Cache-Control",
+      "public, max-age=60, stale-while-revalidate=120",
+    );
+    return response;
   } catch (error) {
-    console.error("GET /api/heatmap error:", error);
+    logger.error("GET /api/heatmap failed", {
+      endpoint: "/api/heatmap",
+      error: error instanceof Error ? error.message : String(error),
+    });
     return NextResponse.json(
       { error: { code: "INTERNAL_ERROR", message: "Internal server error" } },
       { status: 500 },

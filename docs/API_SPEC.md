@@ -46,7 +46,7 @@
       "category": {
         "slug": "restaurant",
         "name": "Ресторан",
-        "icon": "fork-knife",
+        "icon": "utensils",
         "color": "#E74C3C"
       },
       "address": "ул. Панфилова 22, Алматы",
@@ -87,7 +87,7 @@
     "category": {
       "slug": "restaurant",
       "name": "Ресторан",
-      "icon": "fork-knife",
+      "icon": "utensils",
       "color": "#E74C3C"
     },
     "address": "ул. Панфилова 22, Алматы",
@@ -203,16 +203,12 @@ AI-поиск заведений на естественном языке чер
         "weight": 0.87,
         "venueCount": 12
       }
-    ],
-    "bounds": {
-      "sw": { "latitude": 43.20, "longitude": 76.85 },
-      "ne": { "latitude": 43.30, "longitude": 77.00 }
-    }
+    ]
   }
 }
 ```
 
-**Реализация:** `prisma.venue.findMany()` → группировка JS: `round(lat, 3)` + `round(lng, 3)` → avg score, count.
+**Реализация:** `prisma.venue.findMany()` → группировка JS: `round(lat, precision)` → avg score, count. Default resolution: `"low"` (precision 2), поддерживается `"medium"` (3) и `"high"` (4).
 
 ---
 
@@ -225,7 +221,7 @@ AI-поиск заведений на естественном языке чер
 ```json
 {
   "data": [
-    { "slug": "restaurant", "name": "Ресторан", "icon": "fork-knife", "color": "#E74C3C", "count": 20 },
+    { "slug": "restaurant", "name": "Ресторан", "icon": "utensils", "color": "#E74C3C", "count": 20 },
     { "slug": "cafe", "name": "Кафе", "icon": "coffee", "color": "#F39C12", "count": 15 },
     { "slug": "bar", "name": "Бар", "icon": "beer", "color": "#9B59B6", "count": 10 },
     { "slug": "park", "name": "Парк", "icon": "tree", "color": "#27AE60", "count": 10 },
