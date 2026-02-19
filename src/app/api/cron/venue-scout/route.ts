@@ -24,18 +24,36 @@ import { logger } from "@/lib/logger";
  * Auth: Bearer CRON_SECRET
  */
 
-// --- City configurations ---
+// --- City configurations (5 KZ cities, Жезказган — priority) ---
 const CITIES = [
   {
-    name: "Алматы",
-    lat: 43.238,
-    lng: 76.945,
-    radius: 8000,
+    name: "Жезказган",
+    lat: 47.7833,
+    lng: 67.7144,
+    radius: 6000,
   },
   {
     name: "Астана",
     lat: 51.1694,
     lng: 71.4491,
+    radius: 8000,
+  },
+  {
+    name: "Караганда",
+    lat: 49.8047,
+    lng: 73.1094,
+    radius: 7000,
+  },
+  {
+    name: "Шымкент",
+    lat: 42.3417,
+    lng: 69.5967,
+    radius: 7000,
+  },
+  {
+    name: "Алматы",
+    lat: 43.238,
+    lng: 76.945,
     radius: 8000,
   },
 ];
@@ -158,8 +176,8 @@ export async function POST(request: NextRequest) {
             errors.push(`Google/${cq.query}/${city.name}: ${msg}`);
           }
 
-          // Small delay to avoid rate limits
-          await sleep(200);
+          // Delay between queries to avoid rate limits
+          await sleep(1000);
         }
       }
 
@@ -182,6 +200,9 @@ export async function POST(request: NextRequest) {
             const msg = error instanceof Error ? error.message : String(error);
             errors.push(`2GIS/${cq.query}/${city.name}: ${msg}`);
           }
+
+          // Delay between 2GIS queries
+          await sleep(1000);
         }
       }
 
@@ -253,6 +274,9 @@ export async function POST(request: NextRequest) {
           errors.push(`Create ${place.name}: ${msg}`);
         }
       }
+
+      // 2-second pause between cities to avoid rate limits
+      await sleep(2000);
     }
 
     const elapsed = Date.now() - startTime;

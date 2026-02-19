@@ -20,9 +20,9 @@ import { prisma } from "@/lib/prisma";
 
 const googleClient = new GooglePlacesClient();
 
-// Default coordinates for Lazy Discovery search (Almaty center)
-const DEFAULT_LAT = 43.238;
-const DEFAULT_LNG = 76.945;
+// Default coordinates for Lazy Discovery search (Жезказган center)
+const DEFAULT_LAT = 47.7833;
+const DEFAULT_LNG = 67.7144;
 
 export async function POST(request: NextRequest) {
   const ip = getRateLimitKey(request);
