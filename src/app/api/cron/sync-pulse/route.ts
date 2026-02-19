@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { GooglePlacesClient } from "@/lib/google-places";
 import {
   AIAnalyzerService,
   type ReviewForAnalysis,
@@ -15,7 +14,7 @@ import { logger } from "@/lib/logger";
  * Runs every 6-12 hours via external cron trigger.
  *
  * Pipeline per venue:
- *   1. Fetch fresh Google reviews (Places API)
+ *   1. Fetch fresh 2GIS reviews (via Apify scraper)
  *   2. Analyze with Gemini (sentiment + structured insights)
  *   3. Store new reviews + social signals
  *   4. Recalculate Live Score
@@ -30,8 +29,6 @@ import { logger } from "@/lib/logger";
 const BATCH_SIZE = 10;
 const STALE_HOURS = 24;
 
-const googleClient = new GooglePlacesClient();
-
 export async function POST(request: NextRequest) {
   // --- Auth ---
   const authHeader = request.headers.get("authorization");
@@ -44,12 +41,16 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (!googleClient.isConfigured()) {
+  // Check 2GIS review scraping is configured
+  const apifyToken = process.env.APIFY_TOKEN;
+  const apify2GisActor = process.env.APIFY_2GIS_ACTOR;
+
+  if (!apifyToken || !apify2GisActor) {
     return NextResponse.json(
       {
         error: {
           code: "NOT_CONFIGURED",
-          message: "GOOGLE_PLACES_API_KEY not set",
+          message: "APIFY_TOKEN or APIFY_2GIS_ACTOR not set",
         },
       },
       { status: 503 },
@@ -74,7 +75,7 @@ export async function POST(request: NextRequest) {
         name: true,
         latitude: true,
         longitude: true,
-        googlePlaceId: true,
+        twoGisUrl: true,
         liveScore: true,
         category: { select: { name: true } },
       },
@@ -106,7 +107,7 @@ export async function POST(request: NextRequest) {
 
     for (const venue of venues) {
       try {
-        const result = await processVenue(venue);
+        const result = await processVenue(venue, apifyToken, apify2GisActor);
         results.push(result);
       } catch (error) {
         const msg =
@@ -163,7 +164,7 @@ export async function POST(request: NextRequest) {
 }
 
 // ============================================
-// PIPELINE: Process a single venue
+// PIPELINE: Process a single venue via 2GIS
 // ============================================
 
 interface VenueForProcessing {
@@ -171,46 +172,40 @@ interface VenueForProcessing {
   name: string;
   latitude: number;
   longitude: number;
-  googlePlaceId: string | null;
+  twoGisUrl: string | null;
   liveScore: number;
   category: { name: string };
 }
 
-async function processVenue(venue: VenueForProcessing) {
-  // --- Step 1: Resolve Google Place ID ---
-  let placeId = venue.googlePlaceId;
-
-  if (!placeId) {
-    placeId = await googleClient.findPlaceId(
-      venue.name,
-      venue.latitude,
-      venue.longitude,
-    );
-
-    if (placeId) {
-      await prisma.venue.update({
-        where: { id: venue.id },
-        data: { googlePlaceId: placeId },
-      });
-    } else {
-      // Touch updatedAt so we don't retry immediately
-      await prisma.venue.update({
-        where: { id: venue.id },
-        data: { updatedAt: new Date() },
-      });
-      return {
-        venueId: venue.id,
-        name: venue.name,
-        newReviews: 0,
-        vibeScore: null,
-        error: "Could not resolve Google Place ID",
-      };
-    }
+async function processVenue(
+  venue: VenueForProcessing,
+  apifyToken: string,
+  actorId: string,
+) {
+  // --- Step 1: Check if venue has a 2GIS URL ---
+  if (!venue.twoGisUrl) {
+    // No 2GIS URL — touch updatedAt so we don't retry immediately
+    await prisma.venue.update({
+      where: { id: venue.id },
+      data: { updatedAt: new Date() },
+    });
+    return {
+      venueId: venue.id,
+      name: venue.name,
+      newReviews: 0,
+      vibeScore: null,
+      error: "No 2GIS URL for this venue",
+    };
   }
 
-  // --- Step 2: Fetch Google reviews ---
-  const details = await googleClient.getPlaceDetails(placeId);
-  if (!details || details.reviews.length === 0) {
+  // --- Step 2: Fetch 2GIS reviews via Apify ---
+  const twoGisReviews = await fetch2GisReviews(
+    venue.twoGisUrl,
+    apifyToken,
+    actorId,
+  );
+
+  if (twoGisReviews.length === 0) {
     await prisma.venue.update({
       where: { id: venue.id },
       data: { updatedAt: new Date() },
@@ -225,7 +220,7 @@ async function processVenue(venue: VenueForProcessing) {
 
   // --- Step 3: Filter out already-stored reviews ---
   const existingReviews = await prisma.review.findMany({
-    where: { venueId: venue.id, source: "google" },
+    where: { venueId: venue.id, source: "2gis" },
     select: { authorName: true, text: true },
   });
 
@@ -235,17 +230,19 @@ async function processVenue(venue: VenueForProcessing) {
     ),
   );
 
-  const newGoogleReviews = details.reviews.filter(
+  const newReviews = twoGisReviews.filter(
     (r) =>
-      !existingKeys.has(`${r.author_name}::${r.text?.slice(0, 50)}`),
+      r.text &&
+      r.text.length > 5 &&
+      !existingKeys.has(`${r.author}::${r.text.slice(0, 50)}`),
   );
 
   // --- Step 4: Analyze with Gemini ---
   const allReviewsForAnalysis: ReviewForAnalysis[] =
-    details.reviews.map((r) => ({
+    twoGisReviews.map((r) => ({
       text: r.text || `Оценка: ${r.rating}/5`,
       rating: r.rating,
-      source: "google",
+      source: "2gis",
     }));
 
   // Run analysis on all reviews (not just new) for full picture
@@ -257,17 +254,17 @@ async function processVenue(venue: VenueForProcessing) {
 
   // Get sentiment for new reviews individually
   let sentiments: number[] = [];
-  if (newGoogleReviews.length > 0) {
+  if (newReviews.length > 0) {
     sentiments = await AIAnalyzerService.batchSentiment(
-      newGoogleReviews.map(
+      newReviews.map(
         (r) => r.text || `Оценка: ${r.rating}/5`,
       ),
     );
   }
 
   // --- Step 5: Store new reviews ---
-  for (let i = 0; i < newGoogleReviews.length; i++) {
-    const review = newGoogleReviews[i];
+  for (let i = 0; i < newReviews.length; i++) {
+    const review = newReviews[i];
     const sentiment =
       sentiments[i] ??
       Math.round(((review.rating - 3) / 2) * 100) / 100;
@@ -277,10 +274,9 @@ async function processVenue(venue: VenueForProcessing) {
         venueId: venue.id,
         text: review.text || `Оценка: ${review.rating}/5`,
         sentiment,
-        source: "google",
+        source: "2gis",
         rating: review.rating,
-        authorName: review.author_name,
-        createdAt: new Date(review.time * 1000),
+        authorName: review.author,
       },
     });
   }
@@ -289,13 +285,13 @@ async function processVenue(venue: VenueForProcessing) {
   const avgSentiment =
     sentiments.length > 0
       ? sentiments.reduce((a, b) => a + b, 0) / sentiments.length
-      : Math.round(((details.rating - 3) / 2) * 100) / 100;
+      : 0;
 
   await prisma.socialSignal.create({
     data: {
       venueId: venue.id,
-      source: "google_maps",
-      mentionCount: Math.max(1, newGoogleReviews.length),
+      source: "2gis",
+      mentionCount: Math.max(1, newReviews.length),
       sentimentAvg: Math.round(avgSentiment * 100) / 100,
     },
   });
@@ -332,7 +328,7 @@ async function processVenue(venue: VenueForProcessing) {
   });
 
   logger.info(
-    `sync-pulse: "${venue.name}" — ${newGoogleReviews.length} new reviews, ` +
+    `sync-pulse: "${venue.name}" — ${newReviews.length} new 2GIS reviews, ` +
       `vibe ${analysis.vibeScore}, score ${venue.liveScore}→${newScore}`,
     { endpoint: "/api/cron/sync-pulse" },
   );
@@ -340,7 +336,105 @@ async function processVenue(venue: VenueForProcessing) {
   return {
     venueId: venue.id,
     name: venue.name,
-    newReviews: newGoogleReviews.length,
+    newReviews: newReviews.length,
     vibeScore: analysis.vibeScore,
   };
+}
+
+// ============================================
+// 2GIS review fetching via Apify
+// ============================================
+
+interface TwoGisReview {
+  text: string;
+  rating: number;
+  author: string;
+  date?: string;
+}
+
+async function fetch2GisReviews(
+  twoGisUrl: string,
+  token: string,
+  actorId: string,
+): Promise<TwoGisReview[]> {
+  try {
+    // Start Apify actor run
+    const runRes = await fetch(
+      `https://api.apify.com/v2/acts/${actorId}/runs?token=${token}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          startUrls: [{ url: twoGisUrl }],
+          maxReviews: 10,
+          language: "ru",
+        }),
+        signal: AbortSignal.timeout(30_000),
+      },
+    );
+
+    if (!runRes.ok) {
+      logger.warn("2GIS Apify actor start failed", {
+        endpoint: "sync-pulse.fetch2GisReviews",
+        error: `${runRes.status}`,
+      });
+      return [];
+    }
+
+    const runData = await runRes.json();
+    const runId = runData.data?.id;
+    const datasetId = runData.data?.defaultDatasetId;
+    if (!runId || !datasetId) return [];
+
+    // Poll for completion (max 2 min, check every 10s)
+    const maxWait = 120_000;
+    const pollInterval = 10_000;
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < maxWait) {
+      await new Promise((resolve) => setTimeout(resolve, pollInterval));
+
+      const statusRes = await fetch(
+        `https://api.apify.com/v2/actor-runs/${runId}?token=${token}`,
+        { signal: AbortSignal.timeout(10_000) },
+      );
+      if (!statusRes.ok) continue;
+
+      const statusData = await statusRes.json();
+      const status = statusData.data?.status;
+      if (status === "SUCCEEDED") break;
+      if (status === "FAILED" || status === "ABORTED" || status === "TIMED-OUT") {
+        logger.warn(`2GIS Apify run ${status}`, {
+          endpoint: "sync-pulse.fetch2GisReviews",
+        });
+        return [];
+      }
+    }
+
+    // Fetch results
+    const dataRes = await fetch(
+      `https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&format=json`,
+      { signal: AbortSignal.timeout(10_000) },
+    );
+
+    if (!dataRes.ok) return [];
+
+    const items: { text?: string; rating?: number; author?: string; date?: string }[] =
+      await dataRes.json();
+
+    return items
+      .filter((item) => item.text && item.text.length > 5)
+      .map((item) => ({
+        text: item.text!,
+        rating: item.rating || 3,
+        author: item.author || "Гость",
+        date: item.date,
+      }));
+  } catch (error) {
+    logger.error("2GIS review fetching failed", {
+      endpoint: "sync-pulse.fetch2GisReviews",
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return [];
+  }
 }

@@ -3,26 +3,35 @@ import { AIService } from "@/services/ai.service";
 import { VenueService } from "@/services/venue.service";
 import { logger } from "@/lib/logger";
 import { rateLimit, getRateLimitKey } from "@/lib/rate-limit";
-import { GooglePlacesClient } from "@/lib/google-places";
+import { Apify2GisClient } from "@/lib/apify-2gis";
 import { prisma } from "@/lib/prisma";
 
 // ============================================
 // POST /api/search — AI-powered semantic search
-// with Lazy Discovery fallback
+// with Lazy Discovery fallback via 2GIS
 // ============================================
 // Flow:
 //   1. Search our DB via AI (Gemini semantic ranking)
 //   2. If no results → Lazy Discovery:
-//      a. Google Places Text Search for the query
+//      a. 2GIS Places Search for the query
 //      b. Auto-create found venue in DB
 //      c. Return to user (sync-pulse picks it up later)
 // ============================================
 
-const googleClient = new GooglePlacesClient();
+const twoGisClient = new Apify2GisClient();
 
-// Default coordinates for Lazy Discovery search (Жезказган center)
-const DEFAULT_LAT = 47.7833;
-const DEFAULT_LNG = 67.7144;
+// 2GIS category keywords → our category slug
+const TWOGIS_CATEGORY_MAP: [RegExp, string][] = [
+  [/ресторан/i, "restaurant"],
+  [/кафе|кофейн/i, "cafe"],
+  [/бар|паб/i, "bar"],
+  [/парк|сквер/i, "park"],
+  [/торгов|молл|трц/i, "mall"],
+  [/развлеч|кинотеатр|боулинг/i, "entertainment"],
+];
+
+// Default city for Lazy Discovery (Жезказган)
+const DEFAULT_CITY = "Жезказган";
 
 export async function POST(request: NextRequest) {
   const ip = getRateLimitKey(request);
@@ -75,36 +84,34 @@ export async function POST(request: NextRequest) {
       })
       .filter(Boolean);
 
-    // --- Lazy Discovery ---
-    // If AI search found nothing relevant, try discovering via Google Places
-    if (enrichedResults.length === 0 && googleClient.isConfigured()) {
-      logger.info(`Lazy Discovery: no DB results for "${query}", searching Google`, {
+    // --- Lazy Discovery via 2GIS ---
+    // If AI search found nothing relevant, try discovering via 2GIS
+    if (enrichedResults.length === 0 && twoGisClient.isConfigured()) {
+      logger.info(`Lazy Discovery: no DB results for "${query}", searching 2GIS`, {
         endpoint: "/api/search",
       });
 
-      const lat = location?.latitude ?? DEFAULT_LAT;
-      const lng = location?.longitude ?? DEFAULT_LNG;
-
-      const googleResults = await googleClient.textSearch(
+      const twoGisResults = await twoGisClient.searchPlaces(
         query.trim(),
-        lat,
-        lng,
-        5000,
+        DEFAULT_CITY,
+        5,
       );
 
-      if (googleResults.length > 0) {
+      if (twoGisResults.length > 0) {
         // Take the top result and auto-create in our DB
-        const discovered = googleResults[0];
+        const discovered = twoGisResults[0];
 
-        // Check if already exists by googlePlaceId
+        // Check if already exists by name (fuzzy)
         const existing = await prisma.venue.findFirst({
-          where: { googlePlaceId: discovered.place_id },
+          where: {
+            name: { equals: discovered.name, mode: "insensitive" },
+          },
           select: { id: true },
         });
 
         if (!existing) {
-          // Resolve category from Google types
-          const categorySlug = resolveCategory(discovered.types);
+          // Resolve category from 2GIS category string
+          const categorySlug = resolve2GisCategory(discovered.category);
           const category = await prisma.category.findUnique({
             where: { slug: categorySlug },
           });
@@ -117,10 +124,11 @@ export async function POST(request: NextRequest) {
                 data: {
                   name: discovered.name,
                   slug,
-                  address: discovered.formatted_address,
+                  address: discovered.address,
                   latitude: discovered.latitude,
                   longitude: discovered.longitude,
-                  googlePlaceId: discovered.place_id,
+                  twoGisUrl: discovered.url || null,
+                  phone: discovered.phone || null,
                   categoryId: category.id,
                   liveScore: 0,
                   isActive: true,
@@ -132,7 +140,7 @@ export async function POST(request: NextRequest) {
               });
 
               logger.info(
-                `Lazy Discovery: created "${discovered.name}" (${categorySlug})`,
+                `Lazy Discovery: created "${discovered.name}" (${categorySlug}) via 2GIS`,
                 { endpoint: "/api/search" },
               );
 
@@ -160,10 +168,10 @@ export async function POST(request: NextRequest) {
                         isActive: newVenue.isActive,
                       },
                       relevance: 0.8,
-                      reason: "Найдено через Google Places. Данные обновятся после первого анализа.",
+                      reason: "Найдено через 2GIS. Данные обновятся после первого анализа.",
                     },
                   ],
-                  interpretation: `Мы нашли "${discovered.name}" через Google и добавили в LiveCity. Скоро появится AI-анализ отзывов.`,
+                  interpretation: `Мы нашли "${discovered.name}" через 2GIS и добавили в LiveCity. Скоро появится AI-анализ отзывов.`,
                   totalFound: 1,
                   discovered: true,
                 },
@@ -206,22 +214,10 @@ export async function POST(request: NextRequest) {
 // Lazy Discovery helpers
 // ============================================
 
-const GOOGLE_TYPE_TO_CATEGORY: Record<string, string> = {
-  restaurant: "restaurant",
-  cafe: "cafe",
-  bar: "bar",
-  night_club: "bar",
-  park: "park",
-  shopping_mall: "mall",
-  amusement_park: "entertainment",
-  movie_theater: "entertainment",
-  bowling_alley: "entertainment",
-};
-
-function resolveCategory(types: string[]): string {
-  for (const type of types) {
-    if (GOOGLE_TYPE_TO_CATEGORY[type]) {
-      return GOOGLE_TYPE_TO_CATEGORY[type];
+function resolve2GisCategory(category: string): string {
+  for (const [regex, slug] of TWOGIS_CATEGORY_MAP) {
+    if (regex.test(category)) {
+      return slug;
     }
   }
   return "cafe"; // default fallback

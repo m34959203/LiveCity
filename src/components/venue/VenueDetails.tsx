@@ -46,11 +46,6 @@ const trendColor = { rising: "text-emerald-400", stable: "text-zinc-400", declin
 
 /** Source badge config: icon (SVG path), label, color */
 const sourceConfig: Record<string, { icon: string; label: string; color: string }> = {
-  google: {
-    icon: "M12.545 10.239v3.821h5.445c-.712 2.315-2.647 3.972-5.445 3.972a6.033 6.033 0 110-12.064c1.498 0 2.866.549 3.921 1.453l2.814-2.814A9.969 9.969 0 0012.545 2C7.021 2 2.543 6.477 2.543 12s4.478 10 10.002 10c8.396 0 10.249-7.85 9.426-11.748l-9.426-.013z",
-    label: "Google",
-    color: "text-blue-400",
-  },
   "2gis": {
     icon: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z",
     label: "2GIS",
