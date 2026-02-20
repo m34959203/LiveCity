@@ -32,7 +32,8 @@ import { logger } from "@/lib/logger";
  * Auth: Bearer CRON_SECRET
  */
 
-const BATCH_SIZE = Number(process.env.CRON_BATCH_SIZE) || 10;
+const BATCH_SIZE_APIFY = Number(process.env.CRON_BATCH_SIZE) || 10;
+const BATCH_SIZE_OSM = Number(process.env.CRON_BATCH_SIZE_OSM) || 100; // OSM-only is fast (no Apify wait)
 const STALE_HOURS = Number(process.env.CRON_STALE_HOURS) || 24;
 
 export async function POST(request: NextRequest) {
@@ -54,7 +55,9 @@ export async function POST(request: NextRequest) {
   const startTime = Date.now();
 
   try {
-    // --- Find stale venues (not updated in STALE_HOURS) ---
+    // --- Find venues that need processing ---
+    // Priority 1: Unscored venues (liveScore near 0) — always process
+    // Priority 2: Stale venues (not updated in STALE_HOURS)
     const staleThreshold = new Date(
       Date.now() - STALE_HOURS * 60 * 60 * 1000,
     );
@@ -62,7 +65,10 @@ export async function POST(request: NextRequest) {
     const venues = await prisma.venue.findMany({
       where: {
         isActive: true,
-        updatedAt: { lt: staleThreshold },
+        OR: [
+          { liveScore: { lt: 0.1 } },         // unscored venues (priority)
+          { updatedAt: { lt: staleThreshold } }, // stale venues
+        ],
       },
       select: {
         id: true,
@@ -73,14 +79,18 @@ export async function POST(request: NextRequest) {
         liveScore: true,
         category: { select: { name: true, slug: true } },
       },
-      orderBy: { updatedAt: "asc" }, // oldest first
-      take: BATCH_SIZE,
+      orderBy: [
+        { liveScore: "asc" },  // unscored first
+        { updatedAt: "asc" },  // then oldest
+      ],
+      take: hasApify ? BATCH_SIZE_APIFY : BATCH_SIZE_OSM,
     });
 
     if (venues.length === 0) {
       return NextResponse.json({
         data: {
           processed: 0,
+          mode: hasApify ? "apify" : "osm-only",
           message: "All venues up to date",
           timestamp: new Date().toISOString(),
         },
