@@ -6,6 +6,7 @@ import type { VenueListItem } from "@/types/venue";
 interface VenueMarkerProps {
   venue: VenueListItem;
   isSelected: boolean;
+  isHighlighted: boolean;
   onClick: () => void;
 }
 
@@ -15,8 +16,11 @@ function markerColor(score: number): string {
   return "#71717a";
 }
 
-export function VenueMarker({ venue, isSelected, onClick }: VenueMarkerProps) {
-  const color = markerColor(venue.liveScore);
+const MUTED_COLOR = "#3f3f46"; // zinc-700
+
+export function VenueMarker({ venue, isSelected, isHighlighted, onClick }: VenueMarkerProps) {
+  const active = isSelected || isHighlighted;
+  const color = active ? markerColor(venue.liveScore) : MUTED_COLOR;
   const scale = isSelected ? 1.3 : 1;
 
   return (
@@ -34,7 +38,7 @@ export function VenueMarker({ venue, isSelected, onClick }: VenueMarkerProps) {
         style={{ transform: `scale(${scale})` }}
         title={`${venue.name} — ${venue.liveScore}`}
       >
-        {/* Pulse ring only for selected venue */}
+        {/* Pulse ring for selected venue */}
         {isSelected && (
           <div
             className="absolute inset-0 animate-ping rounded-full opacity-20"
@@ -44,9 +48,10 @@ export function VenueMarker({ venue, isSelected, onClick }: VenueMarkerProps) {
 
         {/* Main marker */}
         <div
-          className="relative flex h-7 min-w-7 items-center justify-center rounded-full px-1.5 text-[10px] font-bold text-white"
+          className="relative flex h-7 min-w-7 items-center justify-center rounded-full px-1.5 text-[10px] font-bold transition-colors duration-300"
           style={{
             backgroundColor: color,
+            color: active ? "#fff" : "#a1a1aa",
             boxShadow: isSelected ? `0 0 12px ${color}90` : "none",
           }}
         >
