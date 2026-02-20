@@ -1,7 +1,7 @@
 # LiveCity — Схема базы данных
 
-**Версия:** 1.0 (Demo — реализована)
-**Обновлено:** 2026-02-18
+**Версия:** 2.0
+**Обновлено:** 2026-02-20
 **СУБД:** PostgreSQL
 **ORM:** Prisma 6
 
@@ -10,40 +10,47 @@
 ## 1. ER-диаграмма
 
 ```
-┌──────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│   Category   │────<│      Venue       │>────│   VenueTag      │
-│              │     │                  │     │                 │
-│ id           │     │ id               │     │ venue_id        │
-│ name         │     │ name             │     │ tag_id          │
-│ slug         │     │ slug             │     └────────┬────────┘
-│ icon         │     │ category_id (FK) │              │
-│ color        │     │ description      │     ┌────────▼────────┐
-└──────────────┘     │ ai_description   │     │      Tag        │
-                     │ address          │     │                 │
-                     │ latitude         │     │ id              │
-                     │ longitude        │     │ name            │
-                     │ phone            │     │ slug            │
-                     │ whatsapp         │     └─────────────────┘
-                     │ working_hours    │
-                     │ photo_urls[]     │
-                     │ live_score       │
-                     │ is_active        │
-                     └────────┬─────────┘
-                              │
-              ┌───────────────┼───────────────┐
-              │               │               │
-    ┌─────────▼─────┐ ┌──────▼───────┐ ┌─────▼──────────┐
-    │  ScoreHistory  │ │   Review     │ │ SocialSignal   │
-    │               │ │              │ │                │
-    │ id            │ │ id           │ │ id             │
-    │ venue_id (FK) │ │ venue_id(FK) │ │ venue_id (FK)  │
-    │ score         │ │ text         │ │ source         │
-    │ calculated_at │ │ sentiment    │ │ mention_count  │
-    └───────────────┘ │ source       │ │ sentiment_avg  │
-                      │ rating       │ │ collected_at   │
-                      │ author_name  │ └────────────────┘
-                      │ created_at   │
-                      └──────────────┘
+┌──────────────┐     ┌──────────────────────────────┐     ┌─────────────────┐
+│   Category   │────<│           Venue               │>────│   VenueTag      │
+│              │     │                              │     │                 │
+│ id           │     │ id                           │     │ venue_id        │
+│ name         │     │ name                         │     │ tag_id          │
+│ slug         │     │ slug (unique)                │     └────────┬────────┘
+│ icon         │     │ category_id (FK)             │              │
+│ color        │     │ description                  │     ┌────────▼────────┐
+└──────────────┘     │ ai_description               │     │      Tag        │
+                     │ address                      │     │                 │
+                     │ latitude, longitude           │     │ id              │
+                     │                              │     │ name            │
+                     │ phone, whatsapp, email        │     │ slug            │
+                     │ website                      │     └─────────────────┘
+                     │ google_place_id              │
+                     │ two_gis_id, two_gis_url      │
+                     │ instagram_handle             │
+                     │                              │
+                     │ photo_urls[]                 │
+                     │ working_hours (JSON)         │
+                     │ features[]                   │
+                     │                              │
+                     │ live_score                   │
+                     │ is_active                    │
+                     │ created_at, updated_at       │
+                     └────────────┬─────────────────┘
+                                  │
+                  ┌───────────────┼───────────────┐
+                  │               │               │
+        ┌─────────▼─────┐ ┌──────▼───────┐ ┌─────▼──────────┐
+        │  ScoreHistory  │ │   Review     │ │ SocialSignal   │
+        │               │ │              │ │                │
+        │ id            │ │ id           │ │ id             │
+        │ venue_id (FK) │ │ venue_id(FK) │ │ venue_id (FK)  │
+        │ score         │ │ text         │ │ source         │
+        │ calculated_at │ │ sentiment    │ │ mention_count  │
+        └───────────────┘ │ source       │ │ sentiment_avg  │
+                          │ rating       │ │ collected_at   │
+                          │ author_name  │ └────────────────┘
+                          │ created_at   │
+                          └──────────────┘
 ```
 
 **7 моделей:** Venue, Category, Tag, VenueTag, ScoreHistory, Review, SocialSignal
@@ -65,22 +72,29 @@ datasource db {
 }
 
 model Venue {
-  id            String   @id @default(cuid())
-  name          String
-  slug          String   @unique
-  description   String?  @db.Text
-  aiDescription String?  @db.Text @map("ai_description")
-  address       String
-  latitude      Float
-  longitude     Float
-  phone         String?
-  whatsapp      String?
-  photoUrls     String[] @map("photo_urls")
-  workingHours  Json?    @map("working_hours")
-  liveScore     Float    @default(0) @map("live_score")
-  isActive      Boolean  @default(true) @map("is_active")
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  id              String   @id @default(cuid())
+  name            String
+  slug            String   @unique
+  description     String?  @db.Text
+  aiDescription   String?  @db.Text @map("ai_description")
+  address         String
+  latitude        Float
+  longitude       Float
+  phone           String?
+  whatsapp        String?
+  email           String?
+  website         String?
+  googlePlaceId   String?  @map("google_place_id")
+  twoGisId        String?  @map("two_gis_id")
+  twoGisUrl       String?  @map("two_gis_url")
+  instagramHandle String?  @map("instagram_handle")
+  photoUrls       String[] @map("photo_urls")
+  workingHours    Json?    @map("working_hours")
+  features        String[] @default([])  // Wi-Fi, парковка, средний чек, и т.д.
+  liveScore       Float    @default(0) @map("live_score")
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
 
   categoryId String   @map("category_id")
   category   Category @relation(fields: [categoryId], references: [id])
@@ -145,7 +159,7 @@ model Review {
   id         String   @id @default(cuid())
   text       String   @db.Text
   sentiment  Float    // -1.0 (негатив) ... +1.0 (позитив)
-  source     String   // "google", "2gis", "instagram", "manual"
+  source     String   // "2gis", "instagram", "manual"
   rating     Float?
   authorName String?  @map("author_name")
   createdAt  DateTime @default(now()) @map("created_at")
@@ -154,13 +168,14 @@ model Review {
   venue   Venue  @relation(fields: [venueId], references: [id], onDelete: Cascade)
 
   @@index([venueId, createdAt])
+  @@index([venueId, source])
   @@index([sentiment])
   @@map("reviews")
 }
 
 model SocialSignal {
   id           String   @id @default(cuid())
-  source       String   // "instagram", "tiktok", "google_maps"
+  source       String   // "2gis", "instagram"
   mentionCount Int      @map("mention_count")
   sentimentAvg Float    @map("sentiment_avg")
   collectedAt  DateTime @default(now()) @map("collected_at")
@@ -175,11 +190,39 @@ model SocialSignal {
 
 ---
 
-## 3. Seed-данные (реализовано)
+## 3. Поля модели Venue (21 поле)
 
-### 3.1. Категории (6 штук)
+| Поле | Тип | Описание | Источник данных |
+|---|---|---|---|
+| id | String (cuid) | Уникальный ID | Auto-generated |
+| name | String | Название заведения | Seed / 2GIS / OSM |
+| slug | String (unique) | URL-slug | Auto-generated |
+| description | String? | Описание | Seed |
+| aiDescription | String? | AI-сгенерированное описание | Gemini (sync-pulse) |
+| address | String | Адрес | Seed / 2GIS / OSM |
+| latitude | Float | Широта | Seed / 2GIS / OSM |
+| longitude | Float | Долгота | Seed / 2GIS / OSM |
+| phone | String? | Телефон | 2GIS парсер |
+| whatsapp | String? | WhatsApp номер | 2GIS парсер |
+| email | String? | Email | 2GIS парсер |
+| website | String? | Сайт | 2GIS парсер |
+| googlePlaceId | String? | Google Place ID | Google Places API |
+| twoGisId | String? | ID в 2GIS | 2GIS парсер |
+| twoGisUrl | String? | Ссылка на 2GIS | 2GIS парсер |
+| instagramHandle | String? | Instagram handle | 2GIS парсер |
+| photoUrls | String[] | Фото | 2GIS парсер |
+| workingHours | Json? | Часы работы (пн-вс) | 2GIS парсер |
+| features | String[] | Фичи (Wi-Fi, парковка и т.д.) | 2GIS парсер |
+| liveScore | Float | Live Score (0-10) | SocialSignalService |
+| isActive | Boolean | Активно ли | Default: true |
 
-| Slug | Название | Иконка | Цвет | Кол-во заведений |
+---
+
+## 4. Seed-данные
+
+### 4.1. Категории (6 штук)
+
+| Slug | Название | Иконка | Цвет | Кол-во заведений (seed) |
 |---|---|---|---|---|
 | restaurant | Ресторан | utensils | #E74C3C | 20 |
 | cafe | Кафе | coffee | #F39C12 | 15 |
@@ -188,9 +231,9 @@ model SocialSignal {
 | mall | ТРЦ | shopping-bag | #3498DB | 8 |
 | entertainment | Развлечения | sparkles | #E91E63 | 7 |
 
-**Итого:** 70 заведений в Алматы
+**Seed итого:** 70 заведений в Алматы. Реальное количество растёт через City Radar (OSM) и Lazy Discovery.
 
-### 3.2. Теги (12 штук)
+### 4.2. Теги (12 штук)
 
 | Slug | Название |
 |---|---|
@@ -207,16 +250,16 @@ model SocialSignal {
 | hookah | Кальян |
 | vip | VIP-зал |
 
-### 3.3. Автогенерация при seed
+### 4.3. Автогенерация при seed
 
 - **Reviews:** 5-15 рандомных отзывов на заведение (из шаблонов), sentiment от -0.8 до +0.9
 - **Score History:** 30 дней данных для каждого заведения
-- **Social Signals:** 1-3 источника на заведение (instagram, tiktok, google_maps)
+- **Social Signals:** 1-3 источника на заведение (2gis, instagram)
 - **Working Hours:** JSON с расписанием пн-вс
 
 ---
 
-## 4. Индексы
+## 5. Индексы
 
 | Таблица | Индекс | Назначение |
 |---|---|---|
@@ -225,12 +268,13 @@ model SocialSignal {
 | venues | `(category_id)` | Фильтрация по категории |
 | score_history | `(venue_id, calculated_at)` | История score по дате |
 | reviews | `(venue_id, created_at)` | Последние отзывы |
+| reviews | `(venue_id, source)` | Отзывы по источнику |
 | reviews | `(sentiment)` | Фильтрация негативных |
 | social_signals | `(venue_id, collected_at)` | Последние сигналы |
 
 ---
 
-## 5. Ключевые запросы (Prisma)
+## 6. Ключевые запросы (Prisma)
 
 ### Геопоиск (заведения в bounds)
 
@@ -254,7 +298,7 @@ prisma.venue.findMany({
   where: { isActive: true },
   select: { latitude: true, longitude: true, liveScore: true },
 });
-// Затем группировка в JS: round(lat, 3) + round(lng, 3) → avg(score)
+// Затем группировка в JS: round(lat, precision) + round(lng, precision) → avg(score)
 ```
 
 ### District average
@@ -268,5 +312,38 @@ prisma.venue.aggregate({
   },
   _avg: { liveScore: true },
   _count: true,
+});
+```
+
+### Stale venues (для sync-pulse)
+
+```typescript
+prisma.venue.findMany({
+  where: {
+    isActive: true,
+    OR: [
+      { liveScore: 0 }, // unscored
+      { updatedAt: { lt: staleThreshold } }, // stale
+    ],
+  },
+  orderBy: [{ liveScore: "asc" }, { updatedAt: "asc" }],
+  take: batchSize,
+});
+```
+
+### Competitors (по категории и радиусу)
+
+```typescript
+prisma.venue.findMany({
+  where: {
+    isActive: true,
+    categoryId: venue.categoryId,
+    id: { not: venue.id },
+    latitude: { gte: lat - delta, lte: lat + delta },
+    longitude: { gte: lng - delta, lte: lng + delta },
+  },
+  include: { reviews: { where: { sentiment: { gte: 0.5 } }, take: 10 } },
+  orderBy: { liveScore: "desc" },
+  take: 5,
 });
 ```
