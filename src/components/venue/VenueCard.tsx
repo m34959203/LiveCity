@@ -1,6 +1,7 @@
 "use client";
 
 import { LiveScoreBadge } from "@/components/ui/LiveScoreBadge";
+import { hasAddress } from "@/lib/format";
 import type { VenueListItem } from "@/types/venue";
 
 interface VenueCardProps {
@@ -17,7 +18,9 @@ export function VenueCard({ venue, onClick }: VenueCardProps) {
       <LiveScoreBadge score={venue.liveScore} size="md" />
       <div className="min-w-0 flex-1">
         <h3 className="truncate font-medium text-white">{venue.name}</h3>
-        <p className="truncate text-sm text-zinc-400">{venue.address}</p>
+        {hasAddress(venue.address) && (
+          <p className="truncate text-sm text-zinc-400">{venue.address}</p>
+        )}
         <div className="mt-1 flex gap-1">
           <span
             className="rounded px-1.5 py-0.5 text-xs font-medium"

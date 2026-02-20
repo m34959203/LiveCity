@@ -242,10 +242,8 @@ async function processVenueOsmOnly(
       .filter(Boolean)
       .join(". ");
   } else {
-    // No reviews — generate basic description from venue profile
-    aiDescription =
-      `${venue.category.name} в ${venue.name}. ` +
-      `Рейтинг обновляется автоматически на основе активности.`;
+    // No reviews yet — don't generate fake AI description
+    aiDescription = "";
   }
 
   // Update venue

@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import { hasAddress } from "@/lib/format";
 import { LiveScoreBadge } from "@/components/ui/LiveScoreBadge";
 import { ScoreChart } from "@/components/dashboard/ScoreChart";
 import { ComplaintsList } from "@/components/dashboard/ComplaintsList";
@@ -243,8 +244,12 @@ function DashboardContent() {
                       <span className="rounded-full bg-zinc-800 px-2.5 py-0.5 text-xs">
                         {data.venue.category}
                       </span>
-                      <span className="hidden sm:inline">&middot;</span>
-                      <span className="text-xs">{data.venue.address}</span>
+                      {hasAddress(data.venue.address) && (
+                        <>
+                          <span className="hidden sm:inline">&middot;</span>
+                          <span className="text-xs">{data.venue.address}</span>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>

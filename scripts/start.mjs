@@ -72,6 +72,26 @@ try {
       console.log(`[startup] Updated ${unscoredVenues.length} venues with varied scores`);
     }
 
+    // Clean stale "Адрес не указан" → empty string
+    const staleAddressResult = await prisma.venue.updateMany({
+      where: { address: "Адрес не указан" },
+      data: { address: "" },
+    });
+    if (staleAddressResult.count > 0) {
+      console.log(`[startup] Cleaned ${staleAddressResult.count} venues with stale "Адрес не указан"`);
+    }
+
+    // Clean stale AI descriptions (the useless "Ресторан в X" template)
+    const staleDescResult = await prisma.venue.updateMany({
+      where: {
+        aiDescription: { contains: "Рейтинг обновляется автоматически" },
+      },
+      data: { aiDescription: null },
+    });
+    if (staleDescResult.count > 0) {
+      console.log(`[startup] Cleaned ${staleDescResult.count} venues with stale AI descriptions`);
+    }
+
     await prisma.$disconnect();
   }
 } catch (e) {

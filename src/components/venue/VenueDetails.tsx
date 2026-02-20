@@ -3,6 +3,7 @@
 import { useEffect, useReducer } from "react";
 import Link from "next/link";
 import { LiveScoreBadge } from "@/components/ui/LiveScoreBadge";
+import { hasAddress } from "@/lib/format";
 import type { VenueDetail } from "@/types/venue";
 
 interface VenueDetailsProps {
@@ -192,7 +193,7 @@ export function VenueDetails({ venueId, onClose }: VenueDetailsProps) {
           )}
 
           {/* Address */}
-          {venue.address && venue.address.trim() && (
+          {hasAddress(venue.address) && (
             <p className="mb-4 text-sm text-zinc-400">{venue.address}</p>
           )}
 
