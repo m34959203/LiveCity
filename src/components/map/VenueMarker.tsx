@@ -16,12 +16,10 @@ function markerColor(score: number): string {
   return "#71717a";
 }
 
-const MUTED_COLOR = "#3f3f46"; // zinc-700
-
 export function VenueMarker({ venue, isSelected, isHighlighted, onClick }: VenueMarkerProps) {
+  const color = markerColor(venue.liveScore);
   const active = isSelected || isHighlighted;
-  const color = active ? markerColor(venue.liveScore) : MUTED_COLOR;
-  const scale = isSelected ? 1.3 : 1;
+  const scale = isSelected ? 1.3 : isHighlighted ? 1.15 : 1;
 
   return (
     <Marker
@@ -38,21 +36,20 @@ export function VenueMarker({ venue, isSelected, isHighlighted, onClick }: Venue
         style={{ transform: `scale(${scale})` }}
         title={`${venue.name} — ${venue.liveScore}`}
       >
-        {/* Pulse ring for selected venue */}
-        {isSelected && (
+        {/* Pulse ring for selected or highlighted (search result) venues */}
+        {active && (
           <div
             className="absolute inset-0 animate-ping rounded-full opacity-20"
             style={{ backgroundColor: color, animationDuration: "2s" }}
           />
         )}
 
-        {/* Main marker */}
+        {/* Main marker — always colored by Live Score */}
         <div
-          className="relative flex h-7 min-w-7 items-center justify-center rounded-full px-1.5 text-[10px] font-bold transition-colors duration-300"
+          className="relative flex h-7 min-w-7 items-center justify-center rounded-full px-1.5 text-[10px] font-bold text-white"
           style={{
             backgroundColor: color,
-            color: active ? "#fff" : "#a1a1aa",
-            boxShadow: isSelected ? `0 0 12px ${color}90` : "none",
+            boxShadow: active ? `0 0 12px ${color}90` : "none",
           }}
         >
           {venue.liveScore.toFixed(1)}
