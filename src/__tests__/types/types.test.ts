@@ -51,6 +51,8 @@ describe("Type contracts", () => {
       whatsapp: null,
       workingHours: null,
       tagDetails: [{ slug: "wifi", name: "WiFi" }],
+      reviewCount: 0,
+      signalCount: 0,
       recentReviews: [],
     };
     expect(detail.tagDetails).toHaveLength(1);
