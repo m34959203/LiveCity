@@ -1,18 +1,19 @@
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import { geminiModel } from "@/lib/gemini";
+import { TwoGisService } from "@/services/twogis.service";
 
 // ============================================
 // Social Signal Service — Multi-source collection
 // ============================================
 // Collects social signals from:
-//   1. 2GIS — reviews via Apify scraper
+//   1. 2GIS — reviews via own parser (TwoGisService)
 //   2. Instagram — mentions via Apify scraper (when configured)
 //   3. Gemini AI — sentiment analysis on review texts
 //
 // Architecture: each source is a private method.
 // Enable sources by setting env vars:
-//   APIFY_TOKEN + APIFY_2GIS_ACTOR — 2GIS reviews
+//   (2GIS works out of the box — no keys needed)
 //   APIFY_TOKEN + APIFY_INSTA_ACTOR — Instagram mentions
 // ============================================
 
@@ -52,10 +53,8 @@ export class SocialSignalService {
     });
     if (!venue) return;
 
-    // 2GIS — reviews via Apify scraper
-    if (process.env.APIFY_TOKEN && process.env.APIFY_2GIS_ACTOR && venue.twoGisUrl) {
-      await this.collect2GisSignals(venue);
-    }
+    // 2GIS — reviews via own parser (free, no API key)
+    await this.collect2GisSignals(venue);
 
     // Instagram — mentions via Apify scraper
     if (process.env.APIFY_TOKEN && process.env.APIFY_INSTA_ACTOR && venue.instagramHandle) {
@@ -101,93 +100,56 @@ export class SocialSignalService {
   }
 
   // ------------------------------------------
-  // 2GIS: Reviews via Apify scraper
+  // 2GIS: Reviews via own parser (free)
   // ------------------------------------------
 
   /**
-   * Collect reviews from 2GIS via Apify actor.
-   * Requires: APIFY_TOKEN + APIFY_2GIS_ACTOR env vars.
+   * Collect reviews from 2GIS using own parser.
+   * No API keys needed — uses public 2GIS APIs.
    *
-   * How it works:
-   * 1. Calls Apify 2GIS scraper with venue's twoGisUrl
-   * 2. Gets reviews with text, rating, author
-   * 3. Runs sentiment analysis via Gemini
-   * 4. Stores in DB with source="2gis"
+   * Steps:
+   * 1. If twoGisId exists → fetch reviews directly
+   * 2. Otherwise → search by name+coords, link, then fetch
+   * 3. Deduplicate against existing DB reviews
+   * 4. Sentiment analysis via Gemini
+   * 5. Store new reviews + social signal
    */
   private static async collect2GisSignals(
     venue: VenueForCollection,
   ): Promise<void> {
-    if (!venue.twoGisUrl) return;
-
     try {
-      const token = process.env.APIFY_TOKEN;
-      const actorId = process.env.APIFY_2GIS_ACTOR;
+      let reviews: { text: string; rating: number; author: string; date?: string }[] = [];
 
-      // Start Apify actor run
-      const runRes = await fetch(
-        `https://api.apify.com/v2/acts/${actorId}/runs?token=${token}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            startUrls: [{ url: venue.twoGisUrl }],
-            maxReviews: 10,
-            language: "ru",
-          }),
-          signal: AbortSignal.timeout(30_000),
-        },
-      );
-
-      if (!runRes.ok) {
-        logger.warn("2GIS Apify actor start failed", {
-          endpoint: "SocialSignalService.collect2GisSignals",
-          error: `${runRes.status}`,
-        });
-        return;
-      }
-
-      const runData = await runRes.json();
-      const runId = runData.data?.id;
-      const datasetId = runData.data?.defaultDatasetId;
-      if (!runId || !datasetId) return;
-
-      // Poll for completion (max 2 min, check every 10s)
-      const maxWait = 120_000;
-      const pollInterval = 10_000;
-      const startTime = Date.now();
-
-      while (Date.now() - startTime < maxWait) {
-        await new Promise((resolve) => setTimeout(resolve, pollInterval));
-
-        const statusRes = await fetch(
-          `https://api.apify.com/v2/actor-runs/${runId}?token=${token}`,
-          { signal: AbortSignal.timeout(10_000) },
+      if (venue.twoGisId) {
+        reviews = await TwoGisService.fetchReviews(venue.twoGisId, 20);
+      } else {
+        const { getClosestCity } = await import("@/lib/cities");
+        const city = getClosestCity(venue.latitude, venue.longitude);
+        const result = await TwoGisService.getVenueWithReviews(
+          venue.name,
+          venue.latitude,
+          venue.longitude,
+          city.name,
+          20,
         );
-        if (!statusRes.ok) continue;
 
-        const statusData = await statusRes.json();
-        const status = statusData.data?.status;
-        if (status === "SUCCEEDED") break;
-        if (status === "FAILED" || status === "ABORTED" || status === "TIMED-OUT") {
-          logger.warn(`2GIS Apify run ${status}`, {
-            endpoint: "SocialSignalService.collect2GisSignals",
+        if (result) {
+          reviews = result.reviews;
+          // Link venue to 2GIS
+          await prisma.venue.update({
+            where: { id: venue.id },
+            data: {
+              twoGisId: result.venue.twoGisId,
+              ...(result.venue.phone && { phone: result.venue.phone }),
+              ...(result.venue.workingHours && { workingHours: result.venue.workingHours }),
+            },
           });
-          return;
         }
       }
 
-      // Fetch results
-      const dataRes = await fetch(
-        `https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&format=json`,
-        { signal: AbortSignal.timeout(10_000) },
-      );
+      if (reviews.length === 0) return;
 
-      if (!dataRes.ok) return;
-
-      const items: { text?: string; rating?: number; author?: string; date?: string }[] =
-        await dataRes.json();
-
-      // Filter new reviews
+      // Deduplicate
       const existingReviews = await prisma.review.findMany({
         where: { venueId: venue.id, source: "2gis" },
         select: { authorName: true, text: true },
@@ -196,11 +158,11 @@ export class SocialSignalService {
         existingReviews.map((r) => `${r.authorName}::${r.text?.slice(0, 50)}`),
       );
 
-      const newReviews = items.filter(
+      const newReviews = reviews.filter(
         (r) =>
           r.text &&
           r.text.length > 5 &&
-          !existingKeys.has(`${r.author || "Гость"}::${r.text.slice(0, 50)}`),
+          !existingKeys.has(`${r.author}::${r.text.slice(0, 50)}`),
       );
 
       if (newReviews.length === 0) return;
@@ -208,9 +170,9 @@ export class SocialSignalService {
       // Sentiment analysis
       const sentiments = await this.batchAnalyzeSentiment(
         newReviews.map((r) => ({
-          author: r.author || "Гость",
-          rating: r.rating || 3,
-          text: r.text || "",
+          author: r.author,
+          rating: r.rating,
+          text: r.text,
         })),
       );
 
@@ -223,11 +185,11 @@ export class SocialSignalService {
         await prisma.review.create({
           data: {
             venueId: venue.id,
-            text: review.text!,
+            text: review.text,
             sentiment,
             source: "2gis",
-            rating: review.rating || null,
-            authorName: review.author || "Гость",
+            rating: review.rating,
+            authorName: review.author,
           },
         });
       }
