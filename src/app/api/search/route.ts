@@ -110,6 +110,7 @@ export async function POST(request: NextRequest) {
           cityConfig.lng,
           8,
           5,
+          cityConfig.name,
         );
 
         if (osmResults.length > 0) {
@@ -132,8 +133,11 @@ export async function POST(request: NextRequest) {
               const slug = generateSlug(discovered.name);
 
               try {
-                // Initial score based on category (not 0)
-                const initialScore = categoryInitialScore(discovered.categorySlug);
+                // Initial score: category baseline + unique variation
+                const initialScore = variedScore(
+                  discovered.categorySlug, discovered.name,
+                  discovered.latitude, discovered.longitude,
+                );
 
                 const newVenue = await prisma.venue.create({
                   data: {
@@ -251,15 +255,20 @@ function generateSlug(name: string): string {
   return `${slug}-${suffix}`;
 }
 
-/** Category-based initial score so new OSM venues aren't stuck at 0 */
-function categoryInitialScore(categorySlug: string): number {
-  const scores: Record<string, number> = {
-    restaurant: 5.5,
-    cafe: 5.0,
-    bar: 4.5,
-    park: 6.0,
-    mall: 5.5,
-    entertainment: 5.0,
+/** Varied initial score: category baseline + deterministic per-venue variation */
+function variedScore(
+  categorySlug: string, name: string, lat: number, lng: number,
+): number {
+  const baselines: Record<string, number> = {
+    restaurant: 5.5, cafe: 5.0, bar: 4.5,
+    park: 6.0, mall: 5.5, entertainment: 5.0,
   };
-  return scores[categorySlug] ?? 4.5;
+  const base = baselines[categorySlug] ?? 4.5;
+  let hash = 0;
+  const input = `${name}:${lat.toFixed(4)}:${lng.toFixed(4)}`;
+  for (let i = 0; i < input.length; i++) {
+    hash = ((hash << 5) - hash + input.charCodeAt(i)) | 0;
+  }
+  const variation = (hash % 200) / 100;
+  return Math.round(Math.max(2, Math.min(9, base + variation)) * 10) / 10;
 }

@@ -573,7 +573,10 @@ export class SocialSignalService {
     const venue = await prisma.venue.findUnique({
       where: { id: venueId },
       select: {
+        name: true,
         liveScore: true,
+        latitude: true,
+        longitude: true,
         category: { select: { slug: true } },
         _count: { select: { reviews: true, socialSignals: true } },
       },
@@ -583,20 +586,22 @@ export class SocialSignalService {
     const pulse = await this.getSocialPulse(venueId);
     const hasSignals = venue._count.socialSignals > 0 || pulse.totalMentions > 0;
 
-    // Time-of-day modifier (10%)
+    // Time-of-day modifier — changes every hour for "live" feel
     const hour = new Date().getHours();
-    let timeMod = 5; // neutral
+    let timeMod = 5;
     if (hour >= 11 && hour < 14) timeMod = 7;
     else if (hour >= 18 && hour < 22) timeMod = 8;
     else if (hour >= 22 || hour < 6) timeMod = 3;
     const timeComponent = timeMod * 0.1;
 
     if (!hasSignals) {
-      // No social data yet — use category baseline so venues aren't stuck at 0
+      // No social data — use deterministic venue-unique score
       const baseline = this.categoryBaseline(venue.category.slug);
       const reviewBonus = Math.min(1.5, venue._count.reviews * 0.3);
-      const score = baseline + reviewBonus + timeComponent;
-      return Math.round(Math.max(0, Math.min(10, score)) * 10) / 10;
+      // Venue-unique variation: deterministic ±1.0 based on name+coords
+      const variation = this.venueVariation(venue.name, venue.latitude, venue.longitude);
+      const score = baseline + reviewBonus + timeComponent + variation;
+      return Math.round(Math.max(1, Math.min(9.5, score)) * 10) / 10;
     }
 
     // Base component (40%)
@@ -616,8 +621,23 @@ export class SocialSignalService {
   }
 
   /**
+   * Deterministic variation per venue so scores aren't all identical.
+   * Returns a value between -1.0 and +1.0 based on venue name + coordinates.
+   * Same venue always gets the same variation (no randomness).
+   */
+  private static venueVariation(name: string, lat: number, lng: number): number {
+    // Simple hash from venue name + coords
+    let hash = 0;
+    const input = `${name}:${lat.toFixed(4)}:${lng.toFixed(4)}`;
+    for (let i = 0; i < input.length; i++) {
+      hash = ((hash << 5) - hash + input.charCodeAt(i)) | 0;
+    }
+    // Map to -1.0 .. +1.0
+    return ((hash % 200) / 100);
+  }
+
+  /**
    * Category-based baseline score for venues without social signals.
-   * Based on typical popularity of venue types in Kazakhstan cities.
    */
   private static categoryBaseline(categorySlug: string): number {
     const baselines: Record<string, number> = {

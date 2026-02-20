@@ -40,27 +40,34 @@ try {
       console.log("  - Lazy Discovery (user searches)");
     }
 
-    // Bulk-fix: assign category-based scores to any venues stuck at 0
-    const unscoredCount = await prisma.venue.count({
+    // Bulk-fix: assign varied scores to any venues stuck at 0
+    const unscoredVenues = await prisma.venue.findMany({
       where: { liveScore: { lt: 0.1 }, isActive: true },
+      select: { id: true, name: true, latitude: true, longitude: true, category: { select: { slug: true } } },
     });
-    if (unscoredCount > 0) {
-      console.log(`[startup] ${unscoredCount} venues with score=0 — applying category baselines...`);
+    if (unscoredVenues.length > 0) {
+      console.log(`[startup] ${unscoredVenues.length} venues with score=0 — assigning varied scores...`);
       const baselines = {
         restaurant: 5.5, cafe: 5.0, bar: 4.5,
         park: 6.0, mall: 5.5, entertainment: 5.0,
       };
-      const categories = await prisma.category.findMany({ select: { id: true, slug: true } });
-      let updated = 0;
-      for (const cat of categories) {
-        const score = baselines[cat.slug] ?? 4.5;
-        const result = await prisma.venue.updateMany({
-          where: { categoryId: cat.id, liveScore: { lt: 0.1 }, isActive: true },
-          data: { liveScore: score },
-        });
-        updated += result.count;
+      // Hash function for per-venue variation
+      function venueHash(name, lat, lng) {
+        let h = 0;
+        const s = `${name}:${lat.toFixed(4)}:${lng.toFixed(4)}`;
+        for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+        return (h % 200) / 100; // -1.0 to +1.0
       }
-      console.log(`[startup] Updated ${updated} venues with initial scores`);
+      // Batch update in groups of 50
+      for (let i = 0; i < unscoredVenues.length; i += 50) {
+        const batch = unscoredVenues.slice(i, i + 50);
+        await Promise.all(batch.map(v => {
+          const base = baselines[v.category.slug] ?? 4.5;
+          const score = Math.round(Math.max(2, Math.min(9, base + venueHash(v.name, v.latitude, v.longitude))) * 10) / 10;
+          return prisma.venue.update({ where: { id: v.id }, data: { liveScore: score } });
+        }));
+      }
+      console.log(`[startup] Updated ${unscoredVenues.length} venues with varied scores`);
     }
 
     await prisma.$disconnect();
