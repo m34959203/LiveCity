@@ -14,11 +14,12 @@ interface MapViewProps {
   venues: VenueListItem[];
   onVenueClick: (venueId: string) => void;
   selectedVenueId: string | null;
+  highlightedVenueIds: Set<string>;
   center: { lat: number; lng: number };
   zoom: number;
 }
 
-export function MapView({ venues, onVenueClick, selectedVenueId, center, zoom }: MapViewProps) {
+export function MapView({ venues, onVenueClick, selectedVenueId, highlightedVenueIds, center, zoom }: MapViewProps) {
   const mapRef = useRef<MapRef>(null);
   const [showHeatmap, setShowHeatmap] = useState(false);
   const [viewState, setViewState] = useState({
@@ -63,6 +64,7 @@ export function MapView({ venues, onVenueClick, selectedVenueId, center, zoom }:
               key={v.id}
               venue={v}
               isSelected={v.id === selectedVenueId}
+              isHighlighted={highlightedVenueIds.has(v.id)}
               onClick={() => onVenueClick(v.id)}
             />
           ))

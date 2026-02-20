@@ -101,6 +101,11 @@ export default function Home() {
     return venues.filter((v) => v.category.slug === activeCategory);
   }, [venues, activeCategory]);
 
+  // Highlighted venue IDs from search results
+  const highlightedVenueIds = useMemo(() => {
+    return new Set(searchResults.map((r) => r.venue.id));
+  }, [searchResults]);
+
   // Close panels on Escape
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -190,6 +195,7 @@ export default function Home() {
           venues={filteredVenues}
           onVenueClick={handleVenueClick}
           selectedVenueId={selectedVenueId}
+          highlightedVenueIds={highlightedVenueIds}
           center={{ lat: city.lat, lng: city.lng }}
           zoom={city.zoom}
         />
