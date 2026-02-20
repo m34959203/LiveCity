@@ -3,32 +3,23 @@ import { AIService } from "@/services/ai.service";
 import { VenueService } from "@/services/venue.service";
 import { logger } from "@/lib/logger";
 import { rateLimit, getRateLimitKey } from "@/lib/rate-limit";
-import { Apify2GisClient } from "@/lib/apify-2gis";
+import { OverpassClient } from "@/lib/overpass-osm";
+import { CITIES } from "@/lib/cities";
 import { prisma } from "@/lib/prisma";
 
 // ============================================
 // POST /api/search — AI-powered semantic search
-// with Lazy Discovery fallback via 2GIS
+// with Lazy Discovery fallback via OpenStreetMap
 // ============================================
 // Flow:
 //   1. Search our DB via AI (Gemini semantic ranking)
 //   2. If no results → Lazy Discovery:
-//      a. 2GIS Places Search for the query
+//      a. OSM Overpass search for matching venues
 //      b. Auto-create found venue in DB
 //      c. Return to user (sync-pulse picks it up later)
 // ============================================
 
-const twoGisClient = new Apify2GisClient();
-
-// 2GIS category keywords → our category slug
-const TWOGIS_CATEGORY_MAP: [RegExp, string][] = [
-  [/ресторан/i, "restaurant"],
-  [/кафе|кофейн/i, "cafe"],
-  [/бар|паб/i, "bar"],
-  [/парк|сквер/i, "park"],
-  [/торгов|молл|трц/i, "mall"],
-  [/развлеч|кинотеатр|боулинг/i, "entertainment"],
-];
+const overpassClient = new OverpassClient();
 
 // Default city for Lazy Discovery (configurable via env)
 const DEFAULT_CITY = process.env.DEFAULT_CITY || "Алматы";
@@ -46,7 +37,10 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { query, city: cityName, location, limit = 5 } = body;
-    const searchCity = (typeof cityName === "string" && cityName.trim()) ? cityName.trim() : DEFAULT_CITY;
+    const searchCity =
+      typeof cityName === "string" && cityName.trim()
+        ? cityName.trim()
+        : DEFAULT_CITY;
 
     if (!query || typeof query !== "string" || query.trim().length < 2) {
       return NextResponse.json(
@@ -86,107 +80,109 @@ export async function POST(request: NextRequest) {
       })
       .filter(Boolean);
 
-    // --- Lazy Discovery via 2GIS ---
-    // If AI search found nothing relevant, try discovering via 2GIS
-    if (enrichedResults.length === 0 && twoGisClient.isConfigured()) {
-      logger.info(`Lazy Discovery: no DB results for "${query}", searching 2GIS`, {
-        endpoint: "/api/search",
-      });
+    // --- Lazy Discovery via OpenStreetMap ---
+    // If AI search found nothing relevant, try discovering via Overpass
+    if (enrichedResults.length === 0) {
+      const cityConfig = CITIES.find((c) => c.name === searchCity);
 
-      const twoGisResults = await twoGisClient.searchPlaces(
-        query.trim(),
-        searchCity,
-        5,
-        30_000, // 30s timeout for interactive search (vs 120s for cron)
-      );
+      if (cityConfig) {
+        logger.info(
+          `Lazy Discovery: no DB results for "${query}", searching OSM`,
+          { endpoint: "/api/search" },
+        );
 
-      if (twoGisResults.length > 0) {
-        // Take the top result and auto-create in our DB
-        const discovered = twoGisResults[0];
+        const osmResults = await overpassClient.search(
+          query.trim(),
+          cityConfig.lat,
+          cityConfig.lng,
+          8,
+          5,
+        );
 
-        // Check if already exists by name (fuzzy)
-        const existing = await prisma.venue.findFirst({
-          where: {
-            name: { equals: discovered.name, mode: "insensitive" },
-          },
-          select: { id: true },
-        });
+        if (osmResults.length > 0) {
+          const discovered = osmResults[0];
 
-        if (!existing) {
-          // Resolve category from 2GIS category string
-          const categorySlug = resolve2GisCategory(discovered.category);
-          const category = await prisma.category.findUnique({
-            where: { slug: categorySlug },
+          // Check if already exists by name
+          const existing = await prisma.venue.findFirst({
+            where: {
+              name: { equals: discovered.name, mode: "insensitive" },
+            },
+            select: { id: true },
           });
 
-          if (category) {
-            const slug = generateSlug(discovered.name);
+          if (!existing) {
+            const category = await prisma.category.findUnique({
+              where: { slug: discovered.categorySlug },
+            });
 
-            try {
-              const newVenue = await prisma.venue.create({
-                data: {
-                  name: discovered.name,
-                  slug,
-                  address: discovered.address,
-                  latitude: discovered.latitude,
-                  longitude: discovered.longitude,
-                  twoGisUrl: discovered.url || null,
-                  phone: discovered.phone || null,
-                  categoryId: category.id,
-                  liveScore: 0,
-                  isActive: true,
-                },
-                include: {
-                  category: true,
-                  tags: { include: { tag: true } },
-                },
-              });
+            if (category) {
+              const slug = generateSlug(discovered.name);
 
-              logger.info(
-                `Lazy Discovery: created "${discovered.name}" (${categorySlug}) via 2GIS`,
-                { endpoint: "/api/search" },
-              );
-
-              // Return the newly created venue as a discovery result
-              return NextResponse.json({
-                data: {
-                  results: [
-                    {
-                      venue: {
-                        id: newVenue.id,
-                        name: newVenue.name,
-                        slug: newVenue.slug,
-                        category: {
-                          slug: newVenue.category.slug,
-                          name: newVenue.category.name,
-                          icon: newVenue.category.icon,
-                          color: newVenue.category.color,
-                        },
-                        address: newVenue.address,
-                        latitude: newVenue.latitude,
-                        longitude: newVenue.longitude,
-                        liveScore: newVenue.liveScore,
-                        photoUrls: newVenue.photoUrls,
-                        tags: newVenue.tags.map((vt) => vt.tag.slug),
-                        isActive: newVenue.isActive,
-                      },
-                      relevance: 0.8,
-                      reason: "Найдено через 2GIS. Данные обновятся после первого анализа.",
-                    },
-                  ],
-                  interpretation: `Мы нашли "${discovered.name}" через 2GIS и добавили в LiveCity. Скоро появится AI-анализ отзывов.`,
-                  totalFound: 1,
-                  discovered: true,
-                },
-              });
-            } catch (error) {
-              // Slug collision — venue might already exist under different name
-              const msg = error instanceof Error ? error.message : String(error);
-              if (!msg.includes("Unique constraint")) {
-                logger.error("Lazy Discovery: create failed", {
-                  endpoint: "/api/search",
-                  error: msg,
+              try {
+                const newVenue = await prisma.venue.create({
+                  data: {
+                    name: discovered.name,
+                    slug,
+                    address: discovered.address,
+                    latitude: discovered.latitude,
+                    longitude: discovered.longitude,
+                    phone: discovered.phone || null,
+                    categoryId: category.id,
+                    liveScore: 0,
+                    isActive: true,
+                  },
+                  include: {
+                    category: true,
+                    tags: { include: { tag: true } },
+                  },
                 });
+
+                logger.info(
+                  `Lazy Discovery: created "${discovered.name}" (${discovered.categorySlug}) via OSM`,
+                  { endpoint: "/api/search" },
+                );
+
+                return NextResponse.json({
+                  data: {
+                    results: [
+                      {
+                        venue: {
+                          id: newVenue.id,
+                          name: newVenue.name,
+                          slug: newVenue.slug,
+                          category: {
+                            slug: newVenue.category.slug,
+                            name: newVenue.category.name,
+                            icon: newVenue.category.icon,
+                            color: newVenue.category.color,
+                          },
+                          address: newVenue.address,
+                          latitude: newVenue.latitude,
+                          longitude: newVenue.longitude,
+                          liveScore: newVenue.liveScore,
+                          photoUrls: newVenue.photoUrls,
+                          tags: newVenue.tags.map((vt) => vt.tag.slug),
+                          isActive: newVenue.isActive,
+                        },
+                        relevance: 0.8,
+                        reason:
+                          "Найдено через OpenStreetMap. Данные обновятся после первого анализа.",
+                      },
+                    ],
+                    interpretation: `Мы нашли "${discovered.name}" через OpenStreetMap и добавили в LiveCity.`,
+                    totalFound: 1,
+                    discovered: true,
+                  },
+                });
+              } catch (error) {
+                const msg =
+                  error instanceof Error ? error.message : String(error);
+                if (!msg.includes("Unique constraint")) {
+                  logger.error("Lazy Discovery: create failed", {
+                    endpoint: "/api/search",
+                    error: msg,
+                  });
+                }
               }
             }
           }
@@ -214,17 +210,8 @@ export async function POST(request: NextRequest) {
 }
 
 // ============================================
-// Lazy Discovery helpers
+// Helpers
 // ============================================
-
-function resolve2GisCategory(category: string): string {
-  for (const [regex, slug] of TWOGIS_CATEGORY_MAP) {
-    if (regex.test(category)) {
-      return slug;
-    }
-  }
-  return "cafe"; // default fallback
-}
 
 function generateSlug(name: string): string {
   const translitMap: Record<string, string> = {
