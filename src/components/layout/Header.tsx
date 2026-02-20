@@ -10,15 +10,15 @@ interface HeaderProps {
 
 export function Header({ city, onCityChange }: HeaderProps) {
   return (
-    <header className="fixed left-0 right-0 top-0 z-30 flex h-0 items-center">
-      {/* Logo + City - floating over map */}
-      <div className="absolute left-4 top-4 z-30 flex items-center gap-2">
+    <header className="fixed left-0 right-0 top-0 z-30 flex h-12 items-center px-3 sm:px-4">
+      {/* Logo + City */}
+      <div className="flex items-center gap-2">
         <Link
           href="/"
           className="flex items-center gap-2 rounded-xl bg-zinc-900/90 px-3 py-2 backdrop-blur"
         >
           <div className="h-6 w-6 rounded-full bg-gradient-to-br from-emerald-400 to-cyan-500" />
-          <span className="text-sm font-bold text-white">LiveCity</span>
+          <span className="hidden text-sm font-bold text-white sm:inline">LiveCity</span>
         </Link>
 
         {city && onCityChange && (
@@ -32,17 +32,20 @@ export function Header({ city, onCityChange }: HeaderProps) {
         )}
       </div>
 
-      {/* Nav links - floating top right */}
-      <div className="absolute right-3 top-4 z-30 flex items-center gap-1.5 sm:right-4">
+      {/* Spacer */}
+      <div className="flex-1" />
+
+      {/* Nav links */}
+      <div className="flex items-center gap-1.5">
         <Link
           href="/planner"
-          className="hidden rounded-lg bg-zinc-900/90 px-3 py-2 text-xs font-medium text-zinc-300 backdrop-blur hover:text-white lg:inline-flex"
+          className="hidden rounded-lg bg-zinc-900/90 px-3 py-2 text-xs font-medium text-zinc-300 backdrop-blur hover:text-white sm:inline-flex"
         >
           Планировщик
         </Link>
         <Link
           href="/insights"
-          className="hidden rounded-lg bg-zinc-900/90 px-3 py-2 text-xs font-medium text-zinc-300 backdrop-blur hover:text-white lg:inline-flex"
+          className="hidden rounded-lg bg-zinc-900/90 px-3 py-2 text-xs font-medium text-zinc-300 backdrop-blur hover:text-white sm:inline-flex"
         >
           AI-анализ
         </Link>

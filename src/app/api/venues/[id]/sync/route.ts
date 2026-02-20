@@ -95,12 +95,20 @@ export async function POST(
       });
     }
 
-    // 2. Enrich venue with 2GIS data
+    // 2. Enrich venue with full 2GIS data
+    const v = twoGisData.venue;
     const updates: Record<string, unknown> = {};
-    if (twoGisData.venue.twoGisId) updates.twoGisId = twoGisData.venue.twoGisId;
-    if (twoGisData.venue.address) updates.address = twoGisData.venue.address;
-    if (twoGisData.venue.phone) updates.phone = twoGisData.venue.phone;
-    if (twoGisData.venue.workingHours) updates.workingHours = twoGisData.venue.workingHours;
+    if (v.twoGisId) updates.twoGisId = v.twoGisId;
+    if (v.twoGisUrl) updates.twoGisUrl = v.twoGisUrl;
+    if (v.address) updates.address = v.address;
+    if (v.phone) updates.phone = v.phone;
+    if (v.email) updates.email = v.email;
+    if (v.website) updates.website = v.website;
+    if (v.whatsapp) updates.whatsapp = v.whatsapp;
+    if (v.instagram) updates.instagramHandle = v.instagram;
+    if (v.workingHours) updates.workingHours = v.workingHours;
+    if (v.photoUrl) updates.photoUrls = [v.photoUrl];
+    if (v.features.length > 0) updates.features = v.features;
 
     if (Object.keys(updates).length > 0) {
       await prisma.venue.update({ where: { id: venue.id }, data: updates });
@@ -174,12 +182,20 @@ export async function POST(
         name: venue.name,
         status: "synced",
         twoGis: {
-          id: twoGisData.venue.twoGisId,
-          rating: twoGisData.venue.rating,
-          reviewCount: twoGisData.venue.reviewCount,
-          address: twoGisData.venue.address,
-          phone: twoGisData.venue.phone,
-          workingHours: twoGisData.venue.workingHours,
+          id: v.twoGisId,
+          url: v.twoGisUrl,
+          rating: v.rating,
+          reviewCount: v.reviewCount,
+          address: v.address,
+          phone: v.phone,
+          email: v.email,
+          website: v.website,
+          whatsapp: v.whatsapp,
+          instagram: v.instagram,
+          workingHours: v.workingHours,
+          photoUrl: v.photoUrl,
+          rubrics: v.rubrics,
+          features: v.features.slice(0, 20), // first 20 for readability
         },
         reviews: {
           fetched: twoGisData.reviews.length,

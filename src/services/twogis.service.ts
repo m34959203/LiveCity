@@ -4,10 +4,19 @@ import { logger } from "@/lib/logger";
  * TwoGisService — own 2GIS parser, replaces Apify dependency.
  *
  * Uses public 2GIS APIs:
- *   - Catalog API: search venues, get details (address, hours, phone, rating)
+ *   - Catalog API: search venues, get full details
  *   - Reviews API: fetch actual review text + ratings
  *
  * No API key required — these are public endpoints.
+ *
+ * Extracted data (matching Apify 2GIS Scraper output):
+ *   - id, name, address, coordinates, twoGisUrl
+ *   - rating, reviewCount
+ *   - phone, email, website, socials (whatsapp, vk, telegram, instagram)
+ *   - workingHours
+ *   - photoUrl (main photo)
+ *   - rubrics (categories/subcategories)
+ *   - features (Wi-Fi, parking, avg check, delivery, etc.)
  */
 
 // ============================================
@@ -18,12 +27,27 @@ export interface TwoGisVenueInfo {
   twoGisId: string;
   name: string;
   address: string;
-  phone: string | null;
-  workingHours: Record<string, string> | null;
-  rating: number | null;
-  reviewCount: number;
+  twoGisUrl: string;
   lat: number;
   lng: number;
+  // Rating
+  rating: number | null;
+  reviewCount: number;
+  // Contacts
+  phone: string | null;
+  email: string | null;
+  website: string | null;
+  whatsapp: string | null;
+  instagram: string | null;
+  vk: string | null;
+  telegram: string | null;
+  // Schedule
+  workingHours: Record<string, string> | null;
+  // Media
+  photoUrl: string | null;
+  // Classification
+  rubrics: string[];
+  features: string[];
 }
 
 export interface TwoGisReview {
@@ -43,6 +67,9 @@ const TIMEOUT_MS = 15_000;
 
 // 2GIS public API key (embedded in their web app, safe to use)
 const API_KEY = "rurbbn3446";
+
+// Domain for building venue URLs
+const TWOGIS_DOMAIN = "https://2gis.kz";
 
 // ============================================
 // Service
@@ -65,7 +92,9 @@ export class TwoGisService {
         `${CATALOG_API}/items?q=${encodeURIComponent(query)}` +
         `&point=${lng},${lat}` +
         `&radius=2000` +
-        `&fields=items.point,items.address,items.schedule,items.contact_groups,items.reviews,items.external_content` +
+        `&fields=items.point,items.address,items.schedule,items.contact_groups,` +
+        `items.reviews,items.external_content,items.rubrics,items.attribute_groups,` +
+        `items.photos,items.links,items.name_ex` +
         `&key=${API_KEY}` +
         `&locale=ru_KZ` +
         `&type=branch` +
@@ -87,7 +116,6 @@ export class TwoGisService {
       const items = data?.result?.items;
       if (!items || items.length === 0) return null;
 
-      // Find best match by name similarity
       const best = this.findBestMatch(items, name, lat, lng);
       if (!best) return null;
 
@@ -199,7 +227,6 @@ export class TwoGisService {
     for (const item of items) {
       const itemName = String(item.name || "").toLowerCase().trim();
 
-      // Name similarity score (0-1)
       let nameSim = 0;
       if (itemName === normalizedName) {
         nameSim = 1;
@@ -209,19 +236,17 @@ export class TwoGisService {
       ) {
         nameSim = 0.7;
       } else {
-        // Count common words
         const words1 = normalizedName.split(/\s+/);
         const words2 = itemName.split(/\s+/);
         const common = words1.filter((w) => words2.includes(w)).length;
         nameSim = common / Math.max(words1.length, words2.length);
       }
 
-      // Distance penalty
       const point = item.point as { lat?: number; lon?: number } | undefined;
       let distPenalty = 0;
       if (point?.lat && point?.lon) {
         const dist = this.haversine(lat, lng, point.lat, point.lon);
-        distPenalty = Math.min(0.3, dist / 5000); // max 0.3 penalty for 5km+
+        distPenalty = Math.min(0.3, dist / 5000);
       }
 
       const score = nameSim - distPenalty;
@@ -231,7 +256,6 @@ export class TwoGisService {
       }
     }
 
-    // Require minimum match quality
     return bestScore >= 0.3 ? bestItem : null;
   }
 
@@ -239,29 +263,65 @@ export class TwoGisService {
     item: Record<string, unknown>,
   ): TwoGisVenueInfo {
     const point = item.point as { lat?: number; lon?: number } | undefined;
+    const twoGisId = String(item.id || "");
+
+    // Address
     const address = item.address_name
       ? String(item.address_name)
       : item.full_address_name
         ? String(item.full_address_name)
         : "";
 
-    // Parse phone
+    // URL
+    const twoGisUrl = `${TWOGIS_DOMAIN}/firm/${twoGisId}`;
+
+    // ---- Contacts ----
     let phone: string | null = null;
+    let email: string | null = null;
+    let website: string | null = null;
+    let whatsapp: string | null = null;
+    let instagram: string | null = null;
+    let vk: string | null = null;
+    let telegram: string | null = null;
+
     const contactGroups = item.contact_groups as
-      | { contacts: { type: string; value: string }[] }[]
+      | { contacts: { type: string; value: string; url?: string; text?: string }[] }[]
       | undefined;
-    if (contactGroups && contactGroups.length > 0) {
-      const phoneContact = contactGroups[0]?.contacts?.find(
-        (c) => c.type === "phone",
-      );
-      if (phoneContact) phone = phoneContact.value;
+
+    if (contactGroups) {
+      for (const group of contactGroups) {
+        if (!group.contacts) continue;
+        for (const c of group.contacts) {
+          switch (c.type) {
+            case "phone":
+              if (!phone) phone = c.value;
+              break;
+            case "email":
+              if (!email) email = c.value;
+              break;
+            case "website":
+              if (!website) website = c.url || c.value;
+              break;
+            case "whatsapp":
+              if (!whatsapp) whatsapp = c.value;
+              break;
+            case "instagram":
+              if (!instagram) instagram = c.value || c.text || null;
+              break;
+            case "vkontakte":
+              if (!vk) vk = c.url || c.value;
+              break;
+            case "telegram":
+              if (!telegram) telegram = c.url || c.value;
+              break;
+          }
+        }
+      }
     }
 
-    // Parse working hours
+    // ---- Working hours ----
     let workingHours: Record<string, string> | null = null;
-    const schedule = item.schedule as
-      | { Mon?: string; Tue?: string; Wed?: string; Thu?: string; Fri?: string; Sat?: string; Sun?: string }
-      | undefined;
+    const schedule = item.schedule as Record<string, unknown> | undefined;
     if (schedule) {
       workingHours = {};
       const dayMap: Record<string, string> = {
@@ -269,7 +329,7 @@ export class TwoGisService {
         Fri: "пт", Sat: "сб", Sun: "вс",
       };
       for (const [eng, rus] of Object.entries(dayMap)) {
-        const val = (schedule as Record<string, unknown>)[eng];
+        const val = schedule[eng];
         if (val && typeof val === "object" && val !== null) {
           const working = val as { working_hours?: { from: string; to: string }[] };
           if (working.working_hours && working.working_hours.length > 0) {
@@ -281,19 +341,69 @@ export class TwoGisService {
       if (Object.keys(workingHours).length === 0) workingHours = null;
     }
 
-    // Parse rating
-    const reviews = item.reviews as { general_rating?: number; general_review_count?: number } | undefined;
+    // ---- Rating ----
+    const reviews = item.reviews as
+      | { general_rating?: number; general_review_count?: number }
+      | undefined;
+
+    // ---- Photo ----
+    let photoUrl: string | null = null;
+    const externalContent = item.external_content as
+      | { main_photo_url?: string }[]
+      | undefined;
+    if (externalContent && externalContent.length > 0) {
+      photoUrl = externalContent[0].main_photo_url || null;
+    }
+    if (!photoUrl) {
+      const photos = item.photos as { url?: string }[] | undefined;
+      if (photos && photos.length > 0) {
+        photoUrl = photos[0].url || null;
+      }
+    }
+
+    // ---- Rubrics (categories) ----
+    const rubrics: string[] = [];
+    const rubricList = item.rubrics as { name?: string }[] | undefined;
+    if (rubricList) {
+      for (const r of rubricList) {
+        if (r.name) rubrics.push(r.name);
+      }
+    }
+
+    // ---- Features (from attribute_groups) ----
+    const features: string[] = [];
+    const attrGroups = item.attribute_groups as
+      | { rubric_name?: string; attributes?: { name?: string; tag?: string }[] }[]
+      | undefined;
+    if (attrGroups) {
+      for (const group of attrGroups) {
+        if (!group.attributes) continue;
+        for (const attr of group.attributes) {
+          if (attr.name) features.push(attr.name);
+        }
+      }
+    }
 
     return {
-      twoGisId: String(item.id || ""),
+      twoGisId,
       name: String(item.name || ""),
       address,
-      phone,
-      workingHours,
-      rating: reviews?.general_rating ?? null,
-      reviewCount: reviews?.general_review_count ?? 0,
+      twoGisUrl,
       lat: point?.lat ?? 0,
       lng: point?.lon ?? 0,
+      rating: reviews?.general_rating ?? null,
+      reviewCount: reviews?.general_review_count ?? 0,
+      phone,
+      email,
+      website,
+      whatsapp,
+      instagram,
+      vk,
+      telegram,
+      workingHours,
+      photoUrl,
+      rubrics,
+      features,
     };
   }
 

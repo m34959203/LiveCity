@@ -22,12 +22,15 @@ model Venue {
   longitude     Float
   phone           String?
   whatsapp        String?
+  email           String?
+  website         String?
   googlePlaceId   String?  @map("google_place_id")
   twoGisId        String?  @map("two_gis_id")
   twoGisUrl       String?  @map("two_gis_url")
   instagramHandle String?  @map("instagram_handle")
   photoUrls       String[] @map("photo_urls")
   workingHours  Json?    @map("working_hours")
+  features      String[] @default([])  // Wi-Fi, парковка, средний чек, и т.д.
   liveScore     Float    @default(0) @map("live_score")
   isActive      Boolean  @default(true) @map("is_active")
   createdAt     DateTime @default(now()) @map("created_at")
