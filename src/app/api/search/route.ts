@@ -97,25 +97,30 @@ export async function POST(request: NextRequest) {
 
     // --- Lazy Discovery via OpenStreetMap ---
     // If AI search found nothing relevant, try discovering via Overpass
-    if (enrichedResults.length === 0) {
-      if (cityConfig) {
-        logger.info(
-          `Lazy Discovery: no DB results for "${query}", searching OSM`,
-          { endpoint: "/api/search" },
-        );
+    if (enrichedResults.length === 0 && cityConfig) {
+      logger.info(
+        `Lazy Discovery: no DB results for "${query}", searching OSM`,
+        { endpoint: "/api/search" },
+      );
 
-        const osmResults = await overpassClient.search(
-          query.trim(),
-          cityConfig.lat,
-          cityConfig.lng,
-          8,
-          5,
-          cityConfig.name,
-        );
+      const osmResults = await overpassClient.search(
+        query.trim(),
+        cityConfig.lat,
+        cityConfig.lng,
+        8,
+        10,
+        cityConfig.name,
+      );
 
-        if (osmResults.length > 0) {
-          const discovered = osmResults[0];
+      // Create up to 5 new venues from OSM
+      const discoveredVenues: Array<{
+        venue: Record<string, unknown>;
+        relevance: number;
+        reason: string;
+      }> = [];
 
+      for (const discovered of osmResults.slice(0, 5)) {
+        try {
           // Check if already exists by name
           const existing = await prisma.venue.findFirst({
             where: {
@@ -123,90 +128,84 @@ export async function POST(request: NextRequest) {
             },
             select: { id: true },
           });
+          if (existing) continue;
 
-          if (!existing) {
-            const category = await prisma.category.findUnique({
-              where: { slug: discovered.categorySlug },
+          const category = await prisma.category.findUnique({
+            where: { slug: discovered.categorySlug },
+          });
+          if (!category) continue;
+
+          const slug = generateSlug(discovered.name);
+          const initialScore = variedScore(
+            discovered.categorySlug, discovered.name,
+            discovered.latitude, discovered.longitude,
+          );
+
+          const newVenue = await prisma.venue.create({
+            data: {
+              name: discovered.name,
+              slug,
+              address: discovered.address,
+              latitude: discovered.latitude,
+              longitude: discovered.longitude,
+              phone: discovered.phone || null,
+              categoryId: category.id,
+              liveScore: initialScore,
+              isActive: true,
+            },
+            include: {
+              category: true,
+              tags: { include: { tag: true } },
+            },
+          });
+
+          logger.info(
+            `Lazy Discovery: created "${discovered.name}" (${discovered.categorySlug}) via OSM`,
+            { endpoint: "/api/search" },
+          );
+
+          discoveredVenues.push({
+            venue: {
+              id: newVenue.id,
+              name: newVenue.name,
+              slug: newVenue.slug,
+              category: {
+                slug: newVenue.category.slug,
+                name: newVenue.category.name,
+                icon: newVenue.category.icon,
+                color: newVenue.category.color,
+              },
+              address: newVenue.address,
+              latitude: newVenue.latitude,
+              longitude: newVenue.longitude,
+              liveScore: newVenue.liveScore,
+              photoUrls: newVenue.photoUrls,
+              tags: newVenue.tags.map((vt: { tag: { slug: string } }) => vt.tag.slug),
+              isActive: newVenue.isActive,
+            },
+            relevance: 0.7,
+            reason: "Найдено через OpenStreetMap и добавлено в LiveCity.",
+          });
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          if (!msg.includes("Unique constraint")) {
+            logger.error("Lazy Discovery: create failed", {
+              endpoint: "/api/search",
+              error: msg,
             });
-
-            if (category) {
-              const slug = generateSlug(discovered.name);
-
-              try {
-                // Initial score: category baseline + unique variation
-                const initialScore = variedScore(
-                  discovered.categorySlug, discovered.name,
-                  discovered.latitude, discovered.longitude,
-                );
-
-                const newVenue = await prisma.venue.create({
-                  data: {
-                    name: discovered.name,
-                    slug,
-                    address: discovered.address,
-                    latitude: discovered.latitude,
-                    longitude: discovered.longitude,
-                    phone: discovered.phone || null,
-                    categoryId: category.id,
-                    liveScore: initialScore,
-                    isActive: true,
-                  },
-                  include: {
-                    category: true,
-                    tags: { include: { tag: true } },
-                  },
-                });
-
-                logger.info(
-                  `Lazy Discovery: created "${discovered.name}" (${discovered.categorySlug}) via OSM`,
-                  { endpoint: "/api/search" },
-                );
-
-                return NextResponse.json({
-                  data: {
-                    results: [
-                      {
-                        venue: {
-                          id: newVenue.id,
-                          name: newVenue.name,
-                          slug: newVenue.slug,
-                          category: {
-                            slug: newVenue.category.slug,
-                            name: newVenue.category.name,
-                            icon: newVenue.category.icon,
-                            color: newVenue.category.color,
-                          },
-                          address: newVenue.address,
-                          latitude: newVenue.latitude,
-                          longitude: newVenue.longitude,
-                          liveScore: newVenue.liveScore,
-                          photoUrls: newVenue.photoUrls,
-                          tags: newVenue.tags.map((vt) => vt.tag.slug),
-                          isActive: newVenue.isActive,
-                        },
-                        relevance: 0.8,
-                        reason:
-                          "Найдено через OpenStreetMap. Данные обновятся после первого анализа.",
-                      },
-                    ],
-                    interpretation: `Мы нашли "${discovered.name}" через OpenStreetMap и добавили в LiveCity.`,
-                    totalFound: 1,
-                    discovered: true,
-                  },
-                });
-              } catch (error) {
-                const msg =
-                  error instanceof Error ? error.message : String(error);
-                if (!msg.includes("Unique constraint")) {
-                  logger.error("Lazy Discovery: create failed", {
-                    endpoint: "/api/search",
-                    error: msg,
-                  });
-                }
-              }
-            }
           }
         }
+      }
+
+      if (discoveredVenues.length > 0) {
+        return NextResponse.json({
+          data: {
+            results: discoveredVenues,
+            interpretation: `Найдено ${discoveredVenues.length} новых мест через OpenStreetMap по запросу "${query}".`,
+            totalFound: discoveredVenues.length,
+            discovered: true,
+          },
+        });
       }
     }
 

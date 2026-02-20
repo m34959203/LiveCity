@@ -40,13 +40,15 @@ try {
       console.log("  - Lazy Discovery (user searches)");
     }
 
-    // Bulk-fix: assign varied scores to any venues stuck at 0
+    // Bulk-fix: assign varied scores to venues with flat/unvaried scores
+    // Covers score=0 AND old flat baselines (5.5, 5.0, 4.5, 6.0)
+    const flatScores = [0, 4.5, 5.0, 5.5, 6.0];
     const unscoredVenues = await prisma.venue.findMany({
-      where: { liveScore: { lt: 0.1 }, isActive: true },
+      where: { liveScore: { in: flatScores }, isActive: true },
       select: { id: true, name: true, latitude: true, longitude: true, category: { select: { slug: true } } },
     });
     if (unscoredVenues.length > 0) {
-      console.log(`[startup] ${unscoredVenues.length} venues with score=0 — assigning varied scores...`);
+      console.log(`[startup] ${unscoredVenues.length} venues with flat scores — assigning varied scores...`);
       const baselines = {
         restaurant: 5.5, cafe: 5.0, bar: 4.5,
         park: 6.0, mall: 5.5, entertainment: 5.0,

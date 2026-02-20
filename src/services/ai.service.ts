@@ -89,14 +89,21 @@ export class AIService {
 Запрос: "${query}"
 ${locationHint}
 
-Вот список заведений (JSON). Поля socialMentions/socialSentiment/socialTrend показывают РЕАЛЬНУЮ активность в соцсетях за последнюю неделю. Чем больше упоминаний и чем выше настроение — тем «живее» место прямо сейчас. Предпочитай места с высокой активностью и позитивным настроением.
+Вот список заведений (JSON). Поля socialMentions/socialSentiment/socialTrend показывают РЕАЛЬНУЮ активность в соцсетях за последнюю неделю.
 ${JSON.stringify(venueContext)}
 
-Выбери до 5 наиболее подходящих заведений. Ответь СТРОГО в JSON формате:
+ВАЖНО: ВСЕГДА выбери хотя бы 2-3 заведения, которые могут подойти — даже приблизительно. Например:
+- "живая музыка" → подходят бары, рестораны, ночные клубы
+- "романтический ужин" → подходят рестораны, кафе
+- "с детьми" → подходят парки, кафе, ТРЦ
+- "где поесть" → подходят все рестораны и кафе
+Никогда не возвращай пустой массив results, если в списке есть хоть одно заведение подходящей категории.
+
+Ответь СТРОГО в JSON формате:
 {
   "interpretation": "краткое описание что ищет пользователь (1 предложение на русском)",
   "results": [
-    {"venueId": "id", "relevance": 0.95, "reason": "почему подходит (1-2 предложения на русском, упомяни социальную активность если она высокая)"}
+    {"venueId": "id", "relevance": 0.95, "reason": "почему подходит (1-2 предложения на русском)"}
   ]
 }
 
@@ -210,29 +217,69 @@ ${negativeReviews.map((r, i) => `${i + 1}. "${r}"`).join("\n")}
   }
 
   /**
+   * Keyword → relevant category slugs for fuzzy matching.
+   */
+  private static readonly KEYWORD_CATEGORIES: [RegExp, string[]][] = [
+    [/музык|танц|вечер|клуб|диджей|dj|караоке/i, ["bar", "entertainment"]],
+    [/ресторан|ужин|романтик|обед|банкет/i, ["restaurant"]],
+    [/кафе|кофе|завтрак|десерт|выпечк/i, ["cafe"]],
+    [/бар|пиво|коктейл|виски|напит/i, ["bar"]],
+    [/парк|прогул|природ|озер|сквер|детск|ребенк|ребёнк/i, ["park"]],
+    [/кино|фильм|боулинг|развлеч|игр/i, ["entertainment"]],
+    [/шоппинг|магазин|торгов|молл|трц/i, ["mall"]],
+    [/поесть|голод|еда|кухн|вкусн|шашлык|мясо/i, ["restaurant", "cafe"]],
+  ];
+
+  /**
    * Fallback search when Gemini is unavailable.
+   * Uses keyword-to-category mapping for fuzzy matching.
    */
   private static fallbackSearch(
     query: string,
     venues: VenueListItem[],
   ): { results: AISearchResult[]; interpretation: string } {
     const q = query.toLowerCase();
+
+    // Find relevant categories from keywords
+    const relevantCategories = new Set<string>();
+    for (const [regex, cats] of this.KEYWORD_CATEGORIES) {
+      if (regex.test(q)) cats.forEach((c) => relevantCategories.add(c));
+    }
+
     const scored = venues.map((v) => {
       let relevance = 0;
       const text = `${v.name} ${v.category.name} ${v.address} ${v.tags.join(" ")}`.toLowerCase();
+
+      // Direct text match
       for (const word of q.split(/\s+/)) {
-        if (text.includes(word)) relevance += 0.3;
+        if (word.length >= 3 && text.includes(word)) relevance += 0.3;
       }
+
+      // Category match from keywords
+      if (relevantCategories.has(v.category.slug)) {
+        relevance += 0.5;
+      }
+
+      // Score bonus (higher score = better recommendation)
       relevance += v.liveScore / 30;
-      return { venueId: v.id, relevance: Math.min(1, relevance), reason: v.category.name };
+
+      return {
+        venueId: v.id,
+        relevance: Math.min(1, relevance),
+        reason: relevantCategories.has(v.category.slug)
+          ? `${v.category.name} — может подойти по вашему запросу`
+          : v.category.name,
+      };
     });
+
+    const results = scored
+      .sort((a, b) => b.relevance - a.relevance)
+      .slice(0, 5)
+      .filter((r) => r.relevance > 0.1);
 
     return {
       interpretation: `Поиск по запросу: "${query}"`,
-      results: scored
-        .sort((a, b) => b.relevance - a.relevance)
-        .slice(0, 5)
-        .filter((r) => r.relevance > 0.1),
+      results,
     };
   }
 }
