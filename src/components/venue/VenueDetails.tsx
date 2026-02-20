@@ -129,6 +129,7 @@ export function VenueDetails({ venueId, onClose }: VenueDetailsProps) {
         </h2>
         <button
           onClick={onClose}
+          aria-label="Закрыть панель заведения"
           className="rounded-lg p-2 text-zinc-400 hover:bg-zinc-800 hover:text-white"
         >
           ✕

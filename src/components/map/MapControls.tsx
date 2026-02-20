@@ -25,6 +25,7 @@ export function MapControls({
         onClick={onToggleHeatmap}
         className={`${btn} ${showHeatmap ? "!bg-emerald-600 !text-white" : ""}`}
         title={showHeatmap ? "Маркеры" : "Тепловая карта"}
+        aria-label={showHeatmap ? "Переключить на маркеры" : "Переключить на тепловую карту"}
       >
         {showHeatmap ? "M" : "H"}
       </button>
@@ -32,15 +33,15 @@ export function MapControls({
       <div className="my-1" />
 
       {/* Geolocation */}
-      <button onClick={onGeolocate} className={btn} title="Моё местоположение">
+      <button onClick={onGeolocate} className={btn} title="Моё местоположение" aria-label="Определить моё местоположение">
         ◎
       </button>
 
       {/* Zoom */}
-      <button onClick={onZoomIn} className={btn}>
+      <button onClick={onZoomIn} className={btn} aria-label="Приблизить карту">
         +
       </button>
-      <button onClick={onZoomOut} className={btn}>
+      <button onClick={onZoomOut} className={btn} aria-label="Отдалить карту">
         −
       </button>
     </div>

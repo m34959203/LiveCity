@@ -26,8 +26,8 @@ import { logger } from "@/lib/logger";
  * Auth: Bearer CRON_SECRET
  */
 
-const BATCH_SIZE = 10;
-const STALE_HOURS = 24;
+const BATCH_SIZE = Number(process.env.CRON_BATCH_SIZE) || 10;
+const STALE_HOURS = Number(process.env.CRON_STALE_HOURS) || 24;
 
 export async function POST(request: NextRequest) {
   // --- Auth ---

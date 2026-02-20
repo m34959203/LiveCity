@@ -447,7 +447,7 @@ export class SocialSignalService {
       const scores: unknown[] = JSON.parse(match[0]);
       return scores.map((s, i) => {
         const num = Number(s);
-        if (isNaN(num)) return this.ratingToSentiment(reviews[i].rating);
+        if (!Number.isFinite(num)) return this.ratingToSentiment(reviews[i].rating);
         return Math.max(-1, Math.min(1, Math.round(num * 100) / 100));
       });
     } catch (error) {

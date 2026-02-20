@@ -1,7 +1,15 @@
+import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { geminiModel } from "@/lib/gemini";
 import { SocialSignalService } from "./social-signal.service";
 import { logger } from "@/lib/logger";
+
+const insightResponseSchema = z.object({
+  hook: z.string().default(""),
+  problems: z.array(z.string()).default([]),
+  quickWins: z.array(z.string()).default([]),
+  estimatedRevenueLoss: z.string().default(""),
+});
 
 export interface VenueInsight {
   venue: { id: string; name: string; liveScore: number; category: string };
@@ -74,7 +82,7 @@ ${positiveReviews.slice(0, 5).map((r) => `- "${r.text}"`).join("\n") || "Нет"
         .replace(/```json?\s*/g, "")
         .replace(/```/g, "")
         .trim();
-      const parsed = JSON.parse(cleaned);
+      const parsed = insightResponseSchema.parse(JSON.parse(cleaned));
 
       return {
         venue: {
@@ -88,10 +96,10 @@ ${positiveReviews.slice(0, 5).map((r) => `- "${r.text}"`).join("\n") || "Нет"
           trend: pulse.trend,
           avgSentiment: pulse.avgSentiment,
         },
-        hook: parsed.hook || "",
-        problems: parsed.problems || [],
-        quickWins: parsed.quickWins || [],
-        estimatedRevenueLoss: parsed.estimatedRevenueLoss || "",
+        hook: parsed.hook,
+        problems: parsed.problems,
+        quickWins: parsed.quickWins,
+        estimatedRevenueLoss: parsed.estimatedRevenueLoss,
       };
     } catch (error) {
       logger.error("InsightService AI failed", {

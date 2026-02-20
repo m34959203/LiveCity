@@ -1,5 +1,14 @@
+import { z } from "zod";
 import { geminiModel } from "@/lib/gemini";
 import { logger } from "@/lib/logger";
+
+const venueAnalysisSchema = z.object({
+  vibeScore: z.number(),
+  weakPoints: z.array(z.string()).default([]),
+  strongPoints: z.array(z.string()).default([]),
+  sentimentTrend: z.enum(["improving", "stable", "declining"]).default("stable"),
+  summary: z.string().default(""),
+});
 
 // ============================================
 // AI Analyzer Service — The Brain
@@ -79,22 +88,14 @@ ${reviewTexts}
         .replace(/```json?\s*/g, "")
         .replace(/```/g, "")
         .trim();
-      const parsed = JSON.parse(cleaned);
+      const parsed = venueAnalysisSchema.parse(JSON.parse(cleaned));
 
       return {
-        vibeScore: Math.max(0, Math.min(10, Number(parsed.vibeScore) || 5)),
-        weakPoints: Array.isArray(parsed.weakPoints)
-          ? parsed.weakPoints.slice(0, 5)
-          : [],
-        strongPoints: Array.isArray(parsed.strongPoints)
-          ? parsed.strongPoints.slice(0, 5)
-          : [],
-        sentimentTrend: ["improving", "stable", "declining"].includes(
-          parsed.sentimentTrend,
-        )
-          ? parsed.sentimentTrend
-          : "stable",
-        summary: parsed.summary || "",
+        vibeScore: Math.max(0, Math.min(10, parsed.vibeScore)),
+        weakPoints: parsed.weakPoints.slice(0, 5),
+        strongPoints: parsed.strongPoints.slice(0, 5),
+        sentimentTrend: parsed.sentimentTrend,
+        summary: parsed.summary,
       };
     } catch (error) {
       logger.error("AIAnalyzerService.analyzeReviewsBatch failed", {
