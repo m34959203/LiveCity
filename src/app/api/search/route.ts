@@ -54,8 +54,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Load venues for AI context
-    const { data: venues } = await VenueService.getAll({ limit: 100 });
+    // Load venues for AI context — filtered by city to avoid global bias
+    const cityConfig = CITIES.find((c) => c.name === searchCity);
+    const radiusKm = 15; // generous radius to capture entire city area
+
+    const cityBounds = cityConfig
+      ? {
+          swLat: cityConfig.lat - radiusKm / 111,
+          neLat: cityConfig.lat + radiusKm / 111,
+          swLng: cityConfig.lng - radiusKm / (111 * Math.cos((cityConfig.lat * Math.PI) / 180)),
+          neLng: cityConfig.lng + radiusKm / (111 * Math.cos((cityConfig.lat * Math.PI) / 180)),
+        }
+      : undefined;
+
+    const { data: venues } = await VenueService.getAll({
+      bounds: cityBounds,
+      limit: 100,
+    });
 
     // AI search
     const aiResult = await AIService.semanticSearch(
@@ -83,8 +98,6 @@ export async function POST(request: NextRequest) {
     // --- Lazy Discovery via OpenStreetMap ---
     // If AI search found nothing relevant, try discovering via Overpass
     if (enrichedResults.length === 0) {
-      const cityConfig = CITIES.find((c) => c.name === searchCity);
-
       if (cityConfig) {
         logger.info(
           `Lazy Discovery: no DB results for "${query}", searching OSM`,
