@@ -318,11 +318,19 @@ async function processVenueWithParser(
 
     if (result) {
       reviews = result.reviews;
-      // Enrich venue with 2GIS data
-      venueUpdate.twoGisId = result.venue.twoGisId;
-      if (result.venue.address) venueUpdate.address = result.venue.address;
-      if (result.venue.phone) venueUpdate.phone = result.venue.phone;
-      if (result.venue.workingHours) venueUpdate.workingHours = result.venue.workingHours;
+      const v = result.venue;
+      // Enrich venue with full 2GIS data
+      venueUpdate.twoGisId = v.twoGisId;
+      venueUpdate.twoGisUrl = v.twoGisUrl;
+      if (v.address) venueUpdate.address = v.address;
+      if (v.phone) venueUpdate.phone = v.phone;
+      if (v.email) venueUpdate.email = v.email;
+      if (v.website) venueUpdate.website = v.website;
+      if (v.whatsapp) venueUpdate.whatsapp = v.whatsapp;
+      if (v.instagram) venueUpdate.instagramHandle = v.instagram;
+      if (v.workingHours) venueUpdate.workingHours = v.workingHours;
+      if (v.photoUrl) venueUpdate.photoUrls = [v.photoUrl];
+      if (v.features.length > 0) venueUpdate.features = v.features;
     }
   }
 

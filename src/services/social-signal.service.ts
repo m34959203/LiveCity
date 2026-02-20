@@ -135,13 +135,21 @@ export class SocialSignalService {
 
         if (result) {
           reviews = result.reviews;
-          // Link venue to 2GIS
+          const v = result.venue;
+          // Link venue to 2GIS + enrich with full data
           await prisma.venue.update({
             where: { id: venue.id },
             data: {
-              twoGisId: result.venue.twoGisId,
-              ...(result.venue.phone && { phone: result.venue.phone }),
-              ...(result.venue.workingHours && { workingHours: result.venue.workingHours }),
+              twoGisId: v.twoGisId,
+              twoGisUrl: v.twoGisUrl,
+              ...(v.phone && { phone: v.phone }),
+              ...(v.email && { email: v.email }),
+              ...(v.website && { website: v.website }),
+              ...(v.whatsapp && { whatsapp: v.whatsapp }),
+              ...(v.instagram && { instagramHandle: v.instagram }),
+              ...(v.workingHours && { workingHours: v.workingHours }),
+              ...(v.photoUrl && { photoUrls: [v.photoUrl] }),
+              ...(v.features.length > 0 && { features: v.features }),
             },
           });
         }

@@ -34,13 +34,37 @@ describe("TwoGisService", () => {
               reviews: { general_rating: 4.5, general_review_count: 120 },
               contact_groups: [
                 {
-                  contacts: [{ type: "phone", value: "+7 727 123 4567" }],
+                  contacts: [
+                    { type: "phone", value: "+7 727 123 4567" },
+                    { type: "email", value: "info@aroma.kz" },
+                    { type: "website", value: "aroma.kz", url: "https://aroma.kz" },
+                    { type: "whatsapp", value: "+77271234567" },
+                    { type: "instagram", value: "aroma_almaty", text: "aroma_almaty" },
+                    { type: "vkontakte", value: "aroma_vk", url: "https://vk.com/aroma" },
+                    { type: "telegram", value: "aroma_tg", url: "https://t.me/aroma" },
+                  ],
                 },
               ],
               schedule: {
                 Mon: { working_hours: [{ from: "09:00", to: "22:00" }] },
                 Tue: { working_hours: [{ from: "09:00", to: "22:00" }] },
               },
+              external_content: [
+                { main_photo_url: "https://cdn.2gis.com/photo1.jpg" },
+              ],
+              rubrics: [
+                { name: "Кофейня" },
+                { name: "Кафе" },
+              ],
+              attribute_groups: [
+                {
+                  rubric_name: "Кофейня",
+                  attributes: [
+                    { name: "Wi-Fi" },
+                    { name: "Парковка" },
+                  ],
+                },
+              ],
             },
           ],
         },
@@ -59,13 +83,72 @@ describe("TwoGisService", () => {
       expect(result!.twoGisId).toBe("70000001234567");
       expect(result!.name).toBe("Кофейня Арома");
       expect(result!.address).toBe("ул. Абая, 10");
-      expect(result!.phone).toBe("+7 727 123 4567");
+      expect(result!.twoGisUrl).toBe("https://2gis.kz/firm/70000001234567");
+      expect(result!.lat).toBe(43.238);
+      expect(result!.lng).toBe(76.945);
+      // Rating
       expect(result!.rating).toBe(4.5);
       expect(result!.reviewCount).toBe(120);
+      // Contacts
+      expect(result!.phone).toBe("+7 727 123 4567");
+      expect(result!.email).toBe("info@aroma.kz");
+      expect(result!.website).toBe("https://aroma.kz");
+      expect(result!.whatsapp).toBe("+77271234567");
+      expect(result!.instagram).toBe("aroma_almaty");
+      expect(result!.vk).toBe("https://vk.com/aroma");
+      expect(result!.telegram).toBe("https://t.me/aroma");
+      // Schedule
       expect(result!.workingHours).toEqual({
         пн: "09:00–22:00",
         вт: "09:00–22:00",
       });
+      // Photo
+      expect(result!.photoUrl).toBe("https://cdn.2gis.com/photo1.jpg");
+      // Rubrics
+      expect(result!.rubrics).toEqual(["Кофейня", "Кафе"]);
+      // Features
+      expect(result!.features).toEqual(["Wi-Fi", "Парковка"]);
+    });
+
+    it("returns venue with minimal data (missing optional fields)", async () => {
+      const catalogResponse = {
+        result: {
+          items: [
+            {
+              id: "70000009999999",
+              name: "Простое Кафе",
+              point: { lat: 43.24, lon: 76.95 },
+            },
+          ],
+        },
+      };
+
+      global.fetch = mockFetch(catalogResponse);
+
+      const result = await TwoGisService.searchVenue(
+        "Простое Кафе",
+        43.24,
+        76.95,
+        "Алматы",
+      );
+
+      expect(result).not.toBeNull();
+      expect(result!.twoGisId).toBe("70000009999999");
+      expect(result!.name).toBe("Простое Кафе");
+      expect(result!.address).toBe("");
+      expect(result!.phone).toBeNull();
+      expect(result!.email).toBeNull();
+      expect(result!.website).toBeNull();
+      expect(result!.whatsapp).toBeNull();
+      expect(result!.instagram).toBeNull();
+      expect(result!.vk).toBeNull();
+      expect(result!.telegram).toBeNull();
+      expect(result!.workingHours).toBeNull();
+      expect(result!.photoUrl).toBeNull();
+      expect(result!.rating).toBeNull();
+      expect(result!.reviewCount).toBe(0);
+      expect(result!.rubrics).toEqual([]);
+      expect(result!.features).toEqual([]);
     });
 
     it("returns null when no items found", async () => {
@@ -161,6 +244,33 @@ describe("TwoGisService", () => {
 
       expect(result).not.toBeNull();
       expect(result!.twoGisId).toBe("correct");
+    });
+
+    it("uses photos fallback when no external_content", async () => {
+      const catalogResponse = {
+        result: {
+          items: [
+            {
+              id: "photo_test",
+              name: "Фото Кафе",
+              point: { lat: 43.24, lon: 76.95 },
+              photos: [{ url: "https://cdn.2gis.com/fallback.jpg" }],
+            },
+          ],
+        },
+      };
+
+      global.fetch = mockFetch(catalogResponse);
+
+      const result = await TwoGisService.searchVenue(
+        "Фото Кафе",
+        43.24,
+        76.95,
+        "Алматы",
+      );
+
+      expect(result).not.toBeNull();
+      expect(result!.photoUrl).toBe("https://cdn.2gis.com/fallback.jpg");
     });
   });
 
@@ -279,6 +389,9 @@ describe("TwoGisService", () => {
 
       expect(result).not.toBeNull();
       expect(result!.venue.twoGisId).toBe("venue123");
+      expect(result!.venue.twoGisUrl).toBe("https://2gis.kz/firm/venue123");
+      expect(result!.venue.rubrics).toEqual([]);
+      expect(result!.venue.features).toEqual([]);
       expect(result!.reviews).toHaveLength(1);
     });
 
