@@ -32,6 +32,8 @@ export interface VenueDetail extends VenueListItem {
   workingHours: Record<string, string> | null;
   tags: string[];
   tagDetails: VenueTag[];
+  reviewCount: number;
+  signalCount: number;
   recentReviews: VenueReview[];
 }
 

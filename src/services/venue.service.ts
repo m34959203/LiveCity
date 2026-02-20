@@ -71,6 +71,7 @@ export class VenueService {
           orderBy: { createdAt: "desc" },
           take: 10,
         },
+        _count: { select: { reviews: true, socialSignals: true } },
       },
     });
 
@@ -102,6 +103,8 @@ export class VenueService {
         name: vt.tag.name,
       })),
       isActive: v.isActive,
+      reviewCount: v._count.reviews,
+      signalCount: v._count.socialSignals,
       recentReviews: v.reviews.map((r) => ({
         text: r.text,
         sentiment: r.sentiment,

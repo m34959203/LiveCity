@@ -118,6 +118,7 @@ export function VenueDetails({ venueId, onClose }: VenueDetailsProps) {
   }, [venueId]);
 
   const { venue, pulse, loading } = state;
+  const hasLiveData = (venue?.reviewCount ?? 0) > 0 || (venue?.signalCount ?? 0) > 0;
 
   if (!venueId) return null;
 
@@ -145,7 +146,7 @@ export function VenueDetails({ venueId, onClose }: VenueDetailsProps) {
 
       {venue && !loading && (
         <div className="flex-1 overflow-y-auto p-4">
-          {/* Score + Category */}
+          {/* Score + Category + Basis */}
           <div className="mb-4 flex items-center gap-4">
             <LiveScoreBadge score={venue.liveScore} size="lg" />
             <div>
@@ -158,10 +159,16 @@ export function VenueDetails({ venueId, onClose }: VenueDetailsProps) {
               >
                 {venue.category.name}
               </span>
+              {/* Score basis — transparent about data source */}
+              <p className="mt-1 text-[10px] text-zinc-500">
+                {hasLiveData
+                  ? `На основе ${venue.reviewCount} отзывов и ${venue.signalCount} сигналов`
+                  : "Базовый рейтинг — нет данных пока"}
+              </p>
             </div>
           </div>
 
-          {/* Social Pulse — only show when we have real data */}
+          {/* Social Pulse — real data */}
           {pulse && pulse.totalMentions > 0 && (
             <div className="mb-4 rounded-lg border border-zinc-800 bg-zinc-900 p-3">
               <div className="flex items-center justify-between">
@@ -211,7 +218,7 @@ export function VenueDetails({ venueId, onClose }: VenueDetailsProps) {
             </div>
           )}
 
-          {/* AI Description */}
+          {/* AI Description — only when based on real reviews */}
           {venue.aiDescription && (
             <div className="mb-4 rounded-lg bg-zinc-900 p-3">
               <p className="mb-1 text-xs font-medium text-emerald-400">
@@ -243,12 +250,12 @@ export function VenueDetails({ venueId, onClose }: VenueDetailsProps) {
             </div>
           )}
 
-          {/* Reviews */}
-          {venue.recentReviews && venue.recentReviews.length > 0 && (
-            <div className="mb-4">
-              <h4 className="mb-2 text-sm font-medium text-zinc-200">
-                Последние отзывы
-              </h4>
+          {/* Reviews — always shown */}
+          <div className="mb-4">
+            <h4 className="mb-2 text-sm font-medium text-zinc-200">
+              Отзывы {venue.reviewCount > 0 && <span className="text-zinc-500">({venue.reviewCount})</span>}
+            </h4>
+            {venue.recentReviews && venue.recentReviews.length > 0 ? (
               <div className="space-y-2">
                 {venue.recentReviews.slice(0, 5).map((r, i) => (
                   <div key={i} className="rounded-lg bg-zinc-900 p-3">
@@ -274,8 +281,15 @@ export function VenueDetails({ venueId, onClose }: VenueDetailsProps) {
                   </div>
                 ))}
               </div>
-            </div>
-          )}
+            ) : (
+              <div className="rounded-lg border border-dashed border-zinc-800 p-4 text-center">
+                <p className="text-sm text-zinc-500">Отзывов пока нет</p>
+                <p className="mt-1 text-xs text-zinc-600">
+                  Данные собираются из 2GIS и соцсетей автоматически
+                </p>
+              </div>
+            )}
+          </div>
 
           {/* WhatsApp Button */}
           {venue.whatsapp && (
