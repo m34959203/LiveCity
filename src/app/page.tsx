@@ -42,7 +42,8 @@ function loadSavedCity(): CityConfig | null {
 }
 
 export default function Home() {
-  const [city, setCity] = useState<CityConfig | null>(() => loadSavedCity());
+  const [city, setCity] = useState<CityConfig | null>(null);
+  const [isHydrated, setIsHydrated] = useState(false);
   const [venues, setVenues] = useState<VenueListItem[]>([]);
   const [selectedVenueId, setSelectedVenueId] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<SearchResultItem[]>([]);
@@ -51,6 +52,13 @@ export default function Home() {
   const [showSearchResults, setShowSearchResults] = useState(false);
   const [venuesError, setVenuesError] = useState(false);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
+
+  // Load saved city on client only (avoids hydration mismatch #418)
+  useEffect(() => {
+    const saved = loadSavedCity();
+    if (saved) setCity(saved);
+    setIsHydrated(true);
+  }, []);
 
   // Handle city selection
   const handleCitySelect = useCallback((selected: CityConfig) => {
@@ -122,6 +130,15 @@ export default function Home() {
   const handleVenueClick = useCallback((venueId: string) => {
     setSelectedVenueId(venueId);
   }, []);
+
+  // Wait for client hydration before deciding what to show
+  if (!isHydrated) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-zinc-950">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-600 border-t-emerald-500" />
+      </div>
+    );
+  }
 
   // Show city selector if no city chosen
   if (!city) {

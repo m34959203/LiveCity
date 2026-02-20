@@ -1,18 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { Apify2GisClient, type TwoGisPlace } from "@/lib/apify-2gis";
+import { OverpassClient } from "@/lib/overpass-osm";
 import { logger } from "@/lib/logger";
 
 /**
  * POST /api/cron/venue-scout
  *
- * CITY RADAR — Automatic venue discovery via 2GIS.
+ * CITY RADAR — Automatic venue discovery via OpenStreetMap.
  * Runs weekly (Sunday night) via external cron trigger.
  *
- * Source: Apify 2GIS Places Scraper
+ * Source: OpenStreetMap Overpass API (free, no API key)
  *
  * Pipeline:
- *   1. For each city, run search queries across categories
+ *   1. For each city, fetch all venue types in ONE Overpass query
  *   2. Collect all discovered places
  *   3. Cross-reference with existing venues in DB
  *   4. Create new venues with appropriate category mapping
@@ -21,61 +21,16 @@ import { logger } from "@/lib/logger";
  * Auth: Bearer CRON_SECRET
  */
 
-// --- City configurations (5 KZ cities, Алматы — priority) ---
+// --- City configurations (5 KZ cities) ---
 const CITIES = [
-  {
-    name: "Алматы",
-    lat: 43.2220,
-    lng: 76.8512,
-    radius: 8000,
-  },
-  {
-    name: "Астана",
-    lat: 51.1694,
-    lng: 71.4491,
-    radius: 8000,
-  },
-  {
-    name: "Шымкент",
-    lat: 42.3417,
-    lng: 69.5967,
-    radius: 7000,
-  },
-  {
-    name: "Караганда",
-    lat: 49.8047,
-    lng: 73.1094,
-    radius: 7000,
-  },
-  {
-    name: "Жезказган",
-    lat: 47.7833,
-    lng: 67.7144,
-    radius: 6000,
-  },
+  { name: "Алматы", lat: 43.222, lng: 76.8512, radiusKm: 8 },
+  { name: "Астана", lat: 51.1694, lng: 71.4491, radiusKm: 8 },
+  { name: "Шымкент", lat: 42.3417, lng: 69.5967, radiusKm: 7 },
+  { name: "Караганда", lat: 49.8047, lng: 73.1094, radiusKm: 7 },
+  { name: "Жезказган", lat: 47.7833, lng: 67.7144, radiusKm: 6 },
 ];
 
-// --- Search queries per category ---
-const CATEGORY_QUERIES = [
-  { query: "рестораны", categorySlug: "restaurant" },
-  { query: "кафе кофейни", categorySlug: "cafe" },
-  { query: "бары пабы", categorySlug: "bar" },
-  { query: "парки скверы", categorySlug: "park" },
-  { query: "торговые центры моллы", categorySlug: "mall" },
-  { query: "развлечения боулинг кинотеатр", categorySlug: "entertainment" },
-];
-
-// 2GIS category keywords → our category slug
-const TWOGIS_CATEGORY_MAP: [RegExp, string][] = [
-  [/ресторан/i, "restaurant"],
-  [/кафе|кофейн/i, "cafe"],
-  [/бар|паб/i, "bar"],
-  [/парк|сквер/i, "park"],
-  [/торгов|молл|трц/i, "mall"],
-  [/развлеч|кинотеатр|боулинг/i, "entertainment"],
-];
-
-const twoGisClient = new Apify2GisClient();
+const overpassClient = new OverpassClient();
 
 export async function POST(request: NextRequest) {
   // --- Auth ---
@@ -89,19 +44,6 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (!twoGisClient.isConfigured()) {
-    return NextResponse.json(
-      {
-        error: {
-          code: "NOT_CONFIGURED",
-          message:
-            "APIFY_TOKEN+APIFY_2GIS_PLACES_ACTOR not configured",
-        },
-      },
-      { status: 503 },
-    );
-  }
-
   const startTime = Date.now();
 
   try {
@@ -112,11 +54,6 @@ export async function POST(request: NextRequest) {
     const existingNames = new Set(
       existingVenues.map((v) => v.name.toLowerCase()),
     );
-    const existingTwoGisUrls = new Set(
-      existingVenues
-        .map((v) => v.twoGisUrl)
-        .filter((url): url is string => !!url),
-    );
 
     // --- Load categories from DB ---
     const categories = await prisma.category.findMany();
@@ -126,106 +63,86 @@ export async function POST(request: NextRequest) {
     let totalNew = 0;
     const errors: string[] = [];
 
-    // --- Process each city ---
+    // --- Process each city (1 Overpass query per city) ---
     for (const city of CITIES) {
       logger.info(`venue-scout: scanning ${city.name}`, {
         endpoint: "/api/cron/venue-scout",
       });
 
-      // Collect discovered places from 2GIS
-      const discoveredPlaces: DiscoveredPlace[] = [];
+      try {
+        const places = await overpassClient.discoverAll(
+          city.lat,
+          city.lng,
+          city.radiusKm,
+        );
 
-      for (const cq of CATEGORY_QUERIES) {
-        try {
-          const places = await twoGisClient.searchPlaces(
-            cq.query,
-            city.name,
-            20,
-          );
+        logger.info(
+          `venue-scout: ${city.name} — ${places.length} venues from OSM`,
+          { endpoint: "/api/cron/venue-scout" },
+        );
 
-          for (const p of places) {
-            discoveredPlaces.push(
-              twoGisResultToDiscovered(p, cq.categorySlug),
+        totalDiscovered += places.length;
+
+        // --- Deduplicate and create new venues ---
+        const seen = new Set<string>();
+
+        for (const place of places) {
+          // Skip if already in DB by name
+          if (existingNames.has(place.name.toLowerCase())) continue;
+
+          // Skip duplicates within this batch
+          const dedupeKey = place.osmId || place.name.toLowerCase();
+          if (seen.has(dedupeKey)) continue;
+          seen.add(dedupeKey);
+
+          // Resolve category ID
+          const categoryId = categoryBySlug.get(place.categorySlug);
+          if (!categoryId) continue;
+
+          try {
+            const slug = generateSlug(place.name);
+
+            // Check slug uniqueness
+            const existing = await prisma.venue.findUnique({
+              where: { slug },
+              select: { id: true },
+            });
+            if (existing) continue;
+
+            await prisma.venue.create({
+              data: {
+                name: place.name,
+                slug,
+                address: place.address,
+                latitude: place.latitude,
+                longitude: place.longitude,
+                phone: place.phone || null,
+                categoryId,
+                liveScore: 0,
+                isActive: true,
+              },
+            });
+
+            existingNames.add(place.name.toLowerCase());
+            totalNew++;
+
+            logger.info(
+              `venue-scout: NEW "${place.name}" (${place.categorySlug})`,
+              { endpoint: "/api/cron/venue-scout" },
             );
+          } catch (error) {
+            const msg =
+              error instanceof Error ? error.message : String(error);
+            if (msg.includes("Unique constraint")) continue;
+            errors.push(`Create ${place.name}: ${msg}`);
           }
-        } catch (error) {
-          const msg = error instanceof Error ? error.message : String(error);
-          errors.push(`2GIS/${cq.query}/${city.name}: ${msg}`);
         }
-
-        // Delay between 2GIS queries
-        await sleep(1000);
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        errors.push(`OSM/${city.name}: ${msg}`);
       }
 
-      totalDiscovered += discoveredPlaces.length;
-
-      // --- Deduplicate and create new venues ---
-      const seen = new Set<string>();
-
-      for (const place of discoveredPlaces) {
-        // Skip if already in DB by 2GIS URL
-        if (place.twoGisUrl && existingTwoGisUrls.has(place.twoGisUrl)) {
-          continue;
-        }
-
-        // Skip if already in DB by name (fuzzy)
-        if (existingNames.has(place.name.toLowerCase())) {
-          continue;
-        }
-
-        // Skip duplicates within this batch
-        const dedupeKey = place.twoGisUrl || place.name.toLowerCase();
-        if (seen.has(dedupeKey)) continue;
-        seen.add(dedupeKey);
-
-        // Resolve category ID
-        const categoryId = categoryBySlug.get(place.categorySlug);
-        if (!categoryId) continue;
-
-        try {
-          const slug = generateSlug(place.name);
-
-          // Check slug uniqueness
-          const existing = await prisma.venue.findUnique({
-            where: { slug },
-            select: { id: true },
-          });
-          if (existing) continue;
-
-          await prisma.venue.create({
-            data: {
-              name: place.name,
-              slug,
-              address: place.address,
-              latitude: place.latitude,
-              longitude: place.longitude,
-              twoGisUrl: place.twoGisUrl || null,
-              phone: place.phone || null,
-              categoryId,
-              liveScore: 0,
-              isActive: true,
-            },
-          });
-
-          // Track for dedup within this run
-          if (place.twoGisUrl) {
-            existingTwoGisUrls.add(place.twoGisUrl);
-          }
-          existingNames.add(place.name.toLowerCase());
-          totalNew++;
-
-          logger.info(`venue-scout: NEW "${place.name}" (${place.categorySlug})`, {
-            endpoint: "/api/cron/venue-scout",
-          });
-        } catch (error) {
-          const msg = error instanceof Error ? error.message : String(error);
-          // Skip duplicate slug errors gracefully
-          if (msg.includes("Unique constraint")) continue;
-          errors.push(`Create ${place.name}: ${msg}`);
-        }
-      }
-
-      // 2-second pause between cities to avoid rate limits
+      // Pause between cities (Overpass rate-limit courtesy)
       await sleep(2000);
     }
 
@@ -241,9 +158,7 @@ export async function POST(request: NextRequest) {
         totalDiscovered,
         totalNew,
         cities: CITIES.map((c) => c.name),
-        sources: {
-          twoGis: true,
-        },
+        sources: { osm: true },
         errors: errors.length > 0 ? errors : undefined,
         elapsedMs: elapsed,
         timestamp: new Date().toISOString(),
@@ -270,42 +185,6 @@ export async function POST(request: NextRequest) {
 // HELPERS
 // ============================================
 
-interface DiscoveredPlace {
-  name: string;
-  address: string;
-  latitude: number;
-  longitude: number;
-  categorySlug: string;
-  twoGisUrl?: string;
-  phone?: string;
-}
-
-/** Convert 2GIS result to unified format */
-function twoGisResultToDiscovered(
-  p: TwoGisPlace,
-  fallbackCategory: string,
-): DiscoveredPlace {
-  let categorySlug = fallbackCategory;
-  if (p.category) {
-    for (const [regex, slug] of TWOGIS_CATEGORY_MAP) {
-      if (regex.test(p.category)) {
-        categorySlug = slug;
-        break;
-      }
-    }
-  }
-
-  return {
-    name: p.name,
-    address: p.address,
-    latitude: p.latitude,
-    longitude: p.longitude,
-    categorySlug,
-    twoGisUrl: p.url,
-    phone: p.phone,
-  };
-}
-
 /** Transliterate Russian text and generate URL-safe slug */
 function generateSlug(name: string): string {
   const translitMap: Record<string, string> = {
@@ -325,7 +204,6 @@ function generateSlug(name: string): string {
     .replace(/^-+|-+$/g, "")
     .slice(0, 80);
 
-  // Add random suffix for uniqueness
   const suffix = Math.random().toString(36).slice(2, 6);
   return `${slug}-${suffix}`;
 }

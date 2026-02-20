@@ -29,34 +29,9 @@ try {
   } else {
     console.log(`[startup] ${categoryCount} categories, ${venueCount} venues`);
 
-    // 3. Auto-purge old seed/fake venues (no googlePlaceId AND no twoGisUrl)
-    const seedVenues = await prisma.venue.findMany({
-      where: { googlePlaceId: null, twoGisUrl: null },
-      select: { id: true, name: true },
-    });
-
-    if (seedVenues.length > 0) {
-      const ids = seedVenues.map((v) => v.id);
-      console.log(
-        `[startup] Purging ${seedVenues.length} seed venues (no external source)...`,
-      );
-
-      await prisma.$transaction([
-        prisma.socialSignal.deleteMany({ where: { venueId: { in: ids } } }),
-        prisma.review.deleteMany({ where: { venueId: { in: ids } } }),
-        prisma.scoreHistory.deleteMany({ where: { venueId: { in: ids } } }),
-        prisma.venueTag.deleteMany({ where: { venueId: { in: ids } } }),
-      ]);
-      const deleted = await prisma.venue.deleteMany({
-        where: { id: { in: ids } },
-      });
-      console.log(`[startup] Purged ${deleted.count} fake venues:`);
-      for (const v of seedVenues) {
-        console.log(`  - ${v.name}`);
-      }
-    } else {
-      console.log("[startup] No seed venues to purge — DB is clean");
-    }
+    // Note: purge logic removed — OSM-discovered venues don't have
+    // googlePlaceId or twoGisUrl, so the old purge would delete real data.
+    console.log(`[startup] ${venueCount} venues in DB`);
 
     const realVenues = await prisma.venue.count();
     if (realVenues === 0) {
