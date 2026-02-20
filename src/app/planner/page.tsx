@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import Link from "next/link";
 import { LiveScoreBadge } from "@/components/ui/LiveScoreBadge";
+import { hasAddress } from "@/lib/format";
 import type { DayPlan, PlanStep } from "@/services/planner.service";
 
 const EXAMPLES = [
@@ -38,7 +39,7 @@ function PlanStepCard({ step, index }: { step: PlanStep; index: number }) {
         </div>
 
         <p className="mb-1 text-xs text-zinc-500">
-          {step.venue.category} — {step.venue.address}
+          {step.venue.category}{hasAddress(step.venue.address) ? ` — ${step.venue.address}` : ""}
         </p>
         <p className="text-sm text-zinc-300">{step.reason}</p>
 

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { LiveScoreBadge } from "@/components/ui/LiveScoreBadge";
+import { hasAddress } from "@/lib/format";
 
 interface VenueItem {
   id: string;
@@ -86,7 +87,9 @@ export default function InsightsListPage() {
                 <LiveScoreBadge score={v.liveScore} size="sm" />
                 <div className="flex-1">
                   <p className="font-medium text-white">{v.name}</p>
-                  <p className="text-xs text-zinc-500">{v.address}</p>
+                  {hasAddress(v.address) && (
+                    <p className="text-xs text-zinc-500">{v.address}</p>
+                  )}
                 </div>
                 <span
                   className="rounded-full px-2 py-0.5 text-xs"
