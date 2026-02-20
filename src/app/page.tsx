@@ -70,12 +70,23 @@ export default function Home() {
     }
   }, []);
 
-  // Load venues + auto-refresh every 2 min for live scores
+  // Load venues for selected city + auto-refresh every 2 min for live scores
   useEffect(() => {
     if (!city) return;
 
+    // Calculate geographic bounds for the city (±15km)
+    const radiusKm = 15;
+    const latDelta = radiusKm / 111;
+    const lngDelta = radiusKm / (111 * Math.cos((city.lat * Math.PI) / 180));
+    const bounds = [
+      city.lat - latDelta,
+      city.lng - lngDelta,
+      city.lat + latDelta,
+      city.lng + lngDelta,
+    ].join(",");
+
     const load = () =>
-      fetch("/api/venues?limit=100")
+      fetch(`/api/venues?limit=200&bounds=${bounds}`)
         .then((r) => r.json())
         .then((res) => setVenues(res.data || []))
         .catch(() => setVenuesError(true));

@@ -160,8 +160,8 @@ export function VenueDetails({ venueId, onClose }: VenueDetailsProps) {
             </div>
           </div>
 
-          {/* Social Pulse — the "Truth Filter" indicator */}
-          {pulse && (
+          {/* Social Pulse — only show when we have real data */}
+          {pulse && pulse.totalMentions > 0 && (
             <div className="mb-4 rounded-lg border border-zinc-800 bg-zinc-900 p-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium text-zinc-400">
@@ -192,7 +192,9 @@ export function VenueDetails({ venueId, onClose }: VenueDetailsProps) {
           )}
 
           {/* Address */}
-          <p className="mb-4 text-sm text-zinc-400">{venue.address}</p>
+          {venue.address && venue.address.trim() && (
+            <p className="mb-4 text-sm text-zinc-400">{venue.address}</p>
+          )}
 
           {/* Tags */}
           {venue.tagDetails && venue.tagDetails.length > 0 && (

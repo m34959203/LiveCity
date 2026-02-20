@@ -73,6 +73,7 @@ export class OverpassClient {
     cityLat: number,
     cityLng: number,
     radiusKm: number = 8,
+    cityName?: string,
   ): Promise<OsmVenue[]> {
     const bbox = toBbox(cityLat, cityLng, radiusKm);
 
@@ -86,7 +87,7 @@ export class OverpassClient {
 out center qt;
 `;
 
-    return this.execute(query);
+    return this.execute(query, cityName);
   }
 
   /**
@@ -99,6 +100,7 @@ out center qt;
     cityLng: number,
     radiusKm: number = 8,
     maxItems: number = 20,
+    cityName?: string,
   ): Promise<OsmVenue[]> {
     const bbox = toBbox(cityLat, cityLng, radiusKm);
     const filters = queryToOsmFilters(searchQuery);
@@ -111,26 +113,27 @@ out center qt;
 out center qt;
 `;
 
-    const results = await this.execute(query);
+    const results = await this.execute(query, cityName);
     return results.slice(0, maxItems);
   }
 
-  private async execute(query: string): Promise<OsmVenue[]> {
+  private async execute(query: string, cityName?: string): Promise<OsmVenue[]> {
     // Try primary endpoint first
-    const result = await this.fetchOverpass(PRIMARY_ENDPOINT, query);
+    const result = await this.fetchOverpass(PRIMARY_ENDPOINT, query, cityName);
     if (result !== null) return result;
 
     // Fallback to community mirror
     logger.info("Overpass: trying fallback endpoint", {
       endpoint: "OverpassClient",
     });
-    const fallback = await this.fetchOverpass(FALLBACK_ENDPOINT, query);
+    const fallback = await this.fetchOverpass(FALLBACK_ENDPOINT, query, cityName);
     return fallback ?? [];
   }
 
   private async fetchOverpass(
     endpoint: string,
     query: string,
+    cityName?: string,
   ): Promise<OsmVenue[] | null> {
     try {
       const res = await fetch(endpoint, {
@@ -149,7 +152,7 @@ out center qt;
 
       const data = await res.json();
       const elements = data.elements || [];
-      return parseElements(elements);
+      return parseElements(elements, cityName);
     } catch (error) {
       logger.warn(`Overpass error from ${endpoint}`, {
         endpoint: "OverpassClient",
@@ -164,7 +167,7 @@ out center qt;
 // Helpers
 // ============================================
 
-function parseElements(elements: Record<string, unknown>[]): OsmVenue[] {
+function parseElements(elements: Record<string, unknown>[], cityName?: string): OsmVenue[] {
   return elements
     .filter((el) => {
       const tags = el.tags as Record<string, string> | undefined;
@@ -181,7 +184,7 @@ function parseElements(elements: Record<string, unknown>[]): OsmVenue[] {
 
       return {
         name: tags.name,
-        address: buildAddress(tags),
+        address: buildAddress(tags, cityName),
         latitude: latitude ?? NaN,
         longitude: longitude ?? NaN,
         categorySlug: resolveCategory(tags),
@@ -200,13 +203,35 @@ function resolveCategory(tags: Record<string, string>): string {
   return "cafe";
 }
 
-function buildAddress(tags: Record<string, string>): string {
+function buildAddress(tags: Record<string, string>, cityName?: string): string {
   const parts: string[] = [];
-  if (tags["addr:street"]) parts.push(tags["addr:street"]);
-  if (tags["addr:housenumber"]) parts.push(tags["addr:housenumber"]);
-  if (parts.length > 0) return parts.join(", ");
+
+  // Try structured address first
+  if (tags["addr:street"]) {
+    parts.push(tags["addr:street"]);
+    if (tags["addr:housenumber"]) parts.push(tags["addr:housenumber"]);
+  }
+
+  // City from OSM tags or from the city we're searching
+  const city = tags["addr:city"] || tags["addr:district"] || cityName || "";
+
+  if (parts.length > 0) {
+    return city ? `${city}, ${parts.join(" ")}` : parts.join(" ");
+  }
+
+  // Fallback: free-form address tag
   if (tags.address) return tags.address;
-  return "Адрес не указан";
+  if (tags["addr:full"]) return tags["addr:full"];
+
+  // Fallback: use locality/place name
+  if (tags["addr:place"]) {
+    return city ? `${city}, ${tags["addr:place"]}` : tags["addr:place"];
+  }
+
+  // Last resort: city name from query context
+  if (city) return city;
+
+  return "";
 }
 
 function queryToOsmFilters(q: string): string[] {
