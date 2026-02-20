@@ -109,6 +109,9 @@ export async function POST(request: NextRequest) {
             });
             if (existing) continue;
 
+            // Initial score based on category (not 0, so venues appear ranked on the map)
+            const initialScore = categoryInitialScore(place.categorySlug);
+
             await prisma.venue.create({
               data: {
                 name: place.name,
@@ -118,7 +121,7 @@ export async function POST(request: NextRequest) {
                 longitude: place.longitude,
                 phone: place.phone || null,
                 categoryId,
-                liveScore: 0,
+                liveScore: initialScore,
                 isActive: true,
               },
             });
@@ -210,4 +213,17 @@ function generateSlug(name: string): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Category-based initial score so new OSM venues aren't stuck at 0 */
+function categoryInitialScore(categorySlug: string): number {
+  const scores: Record<string, number> = {
+    restaurant: 5.5,
+    cafe: 5.0,
+    bar: 4.5,
+    park: 6.0,
+    mall: 5.5,
+    entertainment: 5.0,
+  };
+  return scores[categorySlug] ?? 4.5;
 }

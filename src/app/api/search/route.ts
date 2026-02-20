@@ -119,6 +119,9 @@ export async function POST(request: NextRequest) {
               const slug = generateSlug(discovered.name);
 
               try {
+                // Initial score based on category (not 0)
+                const initialScore = categoryInitialScore(discovered.categorySlug);
+
                 const newVenue = await prisma.venue.create({
                   data: {
                     name: discovered.name,
@@ -128,7 +131,7 @@ export async function POST(request: NextRequest) {
                     longitude: discovered.longitude,
                     phone: discovered.phone || null,
                     categoryId: category.id,
-                    liveScore: 0,
+                    liveScore: initialScore,
                     isActive: true,
                   },
                   include: {
@@ -233,4 +236,17 @@ function generateSlug(name: string): string {
 
   const suffix = Math.random().toString(36).slice(2, 6);
   return `${slug}-${suffix}`;
+}
+
+/** Category-based initial score so new OSM venues aren't stuck at 0 */
+function categoryInitialScore(categorySlug: string): number {
+  const scores: Record<string, number> = {
+    restaurant: 5.5,
+    cafe: 5.0,
+    bar: 4.5,
+    park: 6.0,
+    mall: 5.5,
+    entertainment: 5.0,
+  };
+  return scores[categorySlug] ?? 4.5;
 }

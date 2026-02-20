@@ -56,14 +56,18 @@ const server = exec(`npx next start -p ${port}`, { stdio: "inherit" });
 server.stdout?.pipe(process.stdout);
 server.stderr?.pipe(process.stderr);
 
-// Wait for server to be ready, then trigger venue-scout once
+// Wait for server to be ready, then trigger venue-scout + sync-pulse
 if (cronSecret) {
   setTimeout(async () => {
+    const headers = { Authorization: `Bearer ${cronSecret}` };
+    const base = `http://localhost:${port}`;
+
+    // 1. Discover venues from OSM
     try {
       console.log("[startup] Auto-triggering venue-scout (City Radar)...");
-      const res = await fetch(`http://localhost:${port}/api/cron/venue-scout`, {
+      const res = await fetch(`${base}/api/cron/venue-scout`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${cronSecret}` },
+        headers,
       });
       const data = await res.json();
       if (data.data) {
@@ -75,6 +79,25 @@ if (cronSecret) {
       }
     } catch (e) {
       console.log("[startup] venue-scout trigger failed:", e?.message);
+    }
+
+    // 2. Sync-pulse: calculate initial scores + AI descriptions
+    try {
+      console.log("[startup] Auto-triggering sync-pulse (score calculation)...");
+      const res = await fetch(`${base}/api/cron/sync-pulse`, {
+        method: "POST",
+        headers,
+      });
+      const data = await res.json();
+      if (data.data) {
+        console.log(
+          `[startup] sync-pulse: ${data.data.processed} venues processed (mode: ${data.data.mode})`,
+        );
+      } else {
+        console.log("[startup] sync-pulse response:", JSON.stringify(data));
+      }
+    } catch (e) {
+      console.log("[startup] sync-pulse trigger failed:", e?.message);
     }
   }, 15000); // 15s delay for Next.js to fully boot
 }

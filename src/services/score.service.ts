@@ -13,12 +13,15 @@ export class ScoreService {
 
   /**
    * Refresh live scores for all active venues.
-   * 1. Collect fresh social signals
-   * 2. Recalculate scores
+   * 1. Try collecting fresh social signals (skipped if Apify not configured)
+   * 2. Recalculate scores (always runs — uses category baseline when no signals)
    * 3. Save to history
    */
   static async refreshAllScores(): Promise<number> {
-    await SocialSignalService.collectAllSignals();
+    // Only collect signals if Apify is configured; otherwise just recalculate
+    if (process.env.APIFY_TOKEN) {
+      await SocialSignalService.collectAllSignals();
+    }
 
     const venues = await prisma.venue.findMany({
       where: { isActive: true },
@@ -38,7 +41,7 @@ export class ScoreService {
       });
     }
 
-    logger.info("Scores refreshed from social signals", {
+    logger.info(`Scores refreshed for ${venues.length} venues`, {
       endpoint: "ScoreService.refreshAllScores",
     });
 

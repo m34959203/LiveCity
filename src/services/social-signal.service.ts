@@ -561,33 +561,27 @@ export class SocialSignalService {
   /**
    * Calculate Live Score from social signals.
    *
-   * Formula:
+   * Formula (when social signals exist):
    *   base (DB score) * 0.4
    * + social_activity * 0.3 (normalized mentions → 0-10)
    * + social_sentiment * 0.2 (sentiment -1..1 → 0-10)
    * + time_modifier * 0.1
+   *
+   * When no signals: uses category-based baseline + review count + time modifier.
    */
   static async calculateLiveScore(venueId: string): Promise<number> {
     const venue = await prisma.venue.findUnique({
       where: { id: venueId },
-      select: { liveScore: true },
+      select: {
+        liveScore: true,
+        category: { select: { slug: true } },
+        _count: { select: { reviews: true, socialSignals: true } },
+      },
     });
     if (!venue) return 0;
 
     const pulse = await this.getSocialPulse(venueId);
-
-    // Base component (40%)
-    const baseComponent = venue.liveScore * 0.4;
-
-    // Social activity component (30%)
-    // Normalize: 0 mentions = 0, 50+ mentions = 10
-    const activityScore = Math.min(10, (pulse.totalMentions / 50) * 10);
-    const activityComponent = activityScore * 0.3;
-
-    // Sentiment component (20%)
-    // Map -1..1 to 0..10
-    const sentimentScore = (pulse.avgSentiment + 1) * 5;
-    const sentimentComponent = sentimentScore * 0.2;
+    const hasSignals = venue._count.socialSignals > 0 || pulse.totalMentions > 0;
 
     // Time-of-day modifier (10%)
     const hour = new Date().getHours();
@@ -597,8 +591,43 @@ export class SocialSignalService {
     else if (hour >= 22 || hour < 6) timeMod = 3;
     const timeComponent = timeMod * 0.1;
 
+    if (!hasSignals) {
+      // No social data yet — use category baseline so venues aren't stuck at 0
+      const baseline = this.categoryBaseline(venue.category.slug);
+      const reviewBonus = Math.min(1.5, venue._count.reviews * 0.3);
+      const score = baseline + reviewBonus + timeComponent;
+      return Math.round(Math.max(0, Math.min(10, score)) * 10) / 10;
+    }
+
+    // Base component (40%)
+    const baseComponent = venue.liveScore * 0.4;
+
+    // Social activity component (30%)
+    const activityScore = Math.min(10, (pulse.totalMentions / 50) * 10);
+    const activityComponent = activityScore * 0.3;
+
+    // Sentiment component (20%)
+    const sentimentScore = (pulse.avgSentiment + 1) * 5;
+    const sentimentComponent = sentimentScore * 0.2;
+
     const score =
       baseComponent + activityComponent + sentimentComponent + timeComponent;
     return Math.round(Math.max(0, Math.min(10, score)) * 10) / 10;
+  }
+
+  /**
+   * Category-based baseline score for venues without social signals.
+   * Based on typical popularity of venue types in Kazakhstan cities.
+   */
+  private static categoryBaseline(categorySlug: string): number {
+    const baselines: Record<string, number> = {
+      restaurant: 5.5,
+      cafe: 5.0,
+      bar: 4.5,
+      park: 6.0,
+      mall: 5.5,
+      entertainment: 5.0,
+    };
+    return baselines[categorySlug] ?? 4.5;
   }
 }
