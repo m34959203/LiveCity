@@ -54,13 +54,13 @@ export function VenueMarker({ venue, isSelected, onClick }: VenueMarkerProps) {
 
         {/* Main marker */}
         <div
-          className="relative flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold text-white shadow-lg"
+          className="relative flex h-8 min-w-8 items-center justify-center rounded-full px-1.5 text-[10px] font-bold text-white shadow-lg"
           style={{
             backgroundColor: color,
             boxShadow: `0 0 ${pulse ? "14" : "10"}px ${color}${pulse ? "a0" : "80"}`,
           }}
         >
-          {venue.liveScore.toFixed(0)}
+          {venue.liveScore.toFixed(1)}
         </div>
       </div>
     </Marker>
