@@ -26,13 +26,17 @@ export class AnalyticsService {
     const district = await ScoreService.getDistrictAvg(venue.latitude, venue.longitude);
     const cityAvg = await ScoreService.getCityAvg();
 
-    // Rank in district
+    // Rank in district (2 km radius, same formula as ScoreService.getDistrictAvg)
+    const districtRadiusKm = 2;
+    const latDelta = districtRadiusKm / 111;
+    const lngDelta = districtRadiusKm / (111 * Math.cos((venue.latitude * Math.PI) / 180));
+
     const venuesInDistrict = await prisma.venue.count({
       where: {
         isActive: true,
         liveScore: { gte: venue.liveScore },
-        latitude: { gte: venue.latitude - 0.018, lte: venue.latitude + 0.018 },
-        longitude: { gte: venue.longitude - 0.025, lte: venue.longitude + 0.025 },
+        latitude: { gte: venue.latitude - latDelta, lte: venue.latitude + latDelta },
+        longitude: { gte: venue.longitude - lngDelta, lte: venue.longitude + lngDelta },
       },
     });
 

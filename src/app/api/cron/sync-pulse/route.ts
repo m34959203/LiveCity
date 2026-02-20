@@ -13,12 +13,18 @@ import { logger } from "@/lib/logger";
  * MASTER DATA PIPELINE — The Engine.
  * Runs every 6-12 hours via external cron trigger.
  *
- * Pipeline per venue:
- *   1. Fetch fresh 2GIS reviews (via Apify scraper)
- *   2. Analyze with Gemini (sentiment + structured insights)
- *   3. Store new reviews + social signals
- *   4. Recalculate Live Score
- *   5. Update venue AI description with latest analysis
+ * Two modes:
+ *   A) With Apify (APIFY_TOKEN set):
+ *      1. Fetch fresh 2GIS reviews via Apify scraper
+ *      2. Analyze with Gemini (sentiment + structured insights)
+ *      3. Store new reviews + social signals
+ *      4. Recalculate Live Score
+ *      5. Update venue AI description
+ *
+ *   B) Without Apify (OSM-only mode):
+ *      1. Recalculate Live Score from category baseline + existing data
+ *      2. Generate AI description via Gemini (based on venue profile)
+ *      3. Update venue scores and descriptions
  *
  * Batch limit: processes max BATCH_SIZE venues per run
  * to avoid Railway/Vercel timeout (60s).
@@ -26,8 +32,8 @@ import { logger } from "@/lib/logger";
  * Auth: Bearer CRON_SECRET
  */
 
-const BATCH_SIZE = 10;
-const STALE_HOURS = 24;
+const BATCH_SIZE = Number(process.env.CRON_BATCH_SIZE) || 10;
+const STALE_HOURS = Number(process.env.CRON_STALE_HOURS) || 24;
 
 export async function POST(request: NextRequest) {
   // --- Auth ---
@@ -41,21 +47,9 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Check 2GIS review scraping is configured
   const apifyToken = process.env.APIFY_TOKEN;
   const apify2GisActor = process.env.APIFY_2GIS_ACTOR;
-
-  if (!apifyToken || !apify2GisActor) {
-    return NextResponse.json(
-      {
-        error: {
-          code: "NOT_CONFIGURED",
-          message: "APIFY_TOKEN or APIFY_2GIS_ACTOR not set",
-        },
-      },
-      { status: 503 },
-    );
-  }
+  const hasApify = !!(apifyToken && apify2GisActor);
 
   const startTime = Date.now();
 
@@ -77,7 +71,7 @@ export async function POST(request: NextRequest) {
         longitude: true,
         twoGisUrl: true,
         liveScore: true,
-        category: { select: { name: true } },
+        category: { select: { name: true, slug: true } },
       },
       orderBy: { updatedAt: "asc" }, // oldest first
       take: BATCH_SIZE,
@@ -93,9 +87,10 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    logger.info(`sync-pulse: processing ${venues.length} stale venues`, {
-      endpoint: "/api/cron/sync-pulse",
-    });
+    logger.info(
+      `sync-pulse: processing ${venues.length} stale venues (mode: ${hasApify ? "apify" : "osm-only"})`,
+      { endpoint: "/api/cron/sync-pulse" },
+    );
 
     const results: {
       venueId: string;
@@ -107,7 +102,9 @@ export async function POST(request: NextRequest) {
 
     for (const venue of venues) {
       try {
-        const result = await processVenue(venue, apifyToken, apify2GisActor);
+        const result = hasApify
+          ? await processVenueWithApify(venue, apifyToken!, apify2GisActor!)
+          : await processVenueOsmOnly(venue);
         results.push(result);
       } catch (error) {
         const msg =
@@ -141,6 +138,7 @@ export async function POST(request: NextRequest) {
       data: {
         processed: results.length,
         totalNewReviews,
+        mode: hasApify ? "apify" : "osm-only",
         elapsedMs: elapsed,
         results,
         timestamp: new Date().toISOString(),
@@ -164,7 +162,7 @@ export async function POST(request: NextRequest) {
 }
 
 // ============================================
-// PIPELINE: Process a single venue via 2GIS
+// Shared types
 // ============================================
 
 interface VenueForProcessing {
@@ -174,31 +172,114 @@ interface VenueForProcessing {
   longitude: number;
   twoGisUrl: string | null;
   liveScore: number;
-  category: { name: string };
+  category: { name: string; slug: string };
 }
 
-async function processVenue(
+interface ProcessResult {
+  venueId: string;
+  name: string;
+  newReviews: number;
+  vibeScore: number | null;
+  error?: string;
+}
+
+// ============================================
+// MODE B: OSM-only pipeline (no Apify needed)
+// ============================================
+
+async function processVenueOsmOnly(
+  venue: VenueForProcessing,
+): Promise<ProcessResult> {
+  // Recalculate Live Score (uses category baseline when no signals)
+  const newScore = await SocialSignalService.calculateLiveScore(venue.id);
+
+  // Fetch existing reviews for AI analysis (if any)
+  const existingReviews = await prisma.review.findMany({
+    where: { venueId: venue.id },
+    select: { text: true, rating: true, source: true },
+    orderBy: { createdAt: "desc" },
+    take: 30,
+  });
+
+  let aiDescription = "";
+  let vibeScore: number | null = null;
+
+  if (existingReviews.length > 0) {
+    // Have reviews — run full AI analysis
+    const reviewsForAnalysis: ReviewForAnalysis[] = existingReviews.map((r) => ({
+      text: r.text,
+      rating: r.rating ?? 3,
+      source: r.source,
+    }));
+
+    const analysis = await AIAnalyzerService.analyzeReviewsBatch(
+      venue.name,
+      venue.category.name,
+      reviewsForAnalysis,
+    );
+
+    vibeScore = analysis.vibeScore;
+    aiDescription = [
+      analysis.summary,
+      analysis.strongPoints.length > 0
+        ? `Сильные стороны: ${analysis.strongPoints.join(", ")}`
+        : "",
+      analysis.weakPoints.length > 0
+        ? `Зоны роста: ${analysis.weakPoints.join(", ")}`
+        : "",
+      `Тренд: ${analysis.sentimentTrend === "improving" ? "улучшается" : analysis.sentimentTrend === "declining" ? "ухудшается" : "стабильный"}`,
+    ]
+      .filter(Boolean)
+      .join(". ");
+  } else {
+    // No reviews — generate basic description from venue profile
+    aiDescription =
+      `${venue.category.name} в ${venue.name}. ` +
+      `Рейтинг обновляется автоматически на основе активности.`;
+  }
+
+  // Update venue
+  await prisma.venue.update({
+    where: { id: venue.id },
+    data: {
+      liveScore: newScore,
+      aiDescription,
+    },
+  });
+
+  // Save score to history
+  await prisma.scoreHistory.create({
+    data: { venueId: venue.id, score: newScore },
+  });
+
+  logger.info(
+    `sync-pulse [osm]: "${venue.name}" — score ${venue.liveScore}→${newScore}`,
+    { endpoint: "/api/cron/sync-pulse" },
+  );
+
+  return {
+    venueId: venue.id,
+    name: venue.name,
+    newReviews: 0,
+    vibeScore,
+  };
+}
+
+// ============================================
+// MODE A: Full pipeline with Apify 2GIS reviews
+// ============================================
+
+async function processVenueWithApify(
   venue: VenueForProcessing,
   apifyToken: string,
   actorId: string,
-) {
-  // --- Step 1: Check if venue has a 2GIS URL ---
+): Promise<ProcessResult> {
   if (!venue.twoGisUrl) {
-    // No 2GIS URL — touch updatedAt so we don't retry immediately
-    await prisma.venue.update({
-      where: { id: venue.id },
-      data: { updatedAt: new Date() },
-    });
-    return {
-      venueId: venue.id,
-      name: venue.name,
-      newReviews: 0,
-      vibeScore: null,
-      error: "No 2GIS URL for this venue",
-    };
+    // No 2GIS URL — fall back to OSM-only pipeline
+    return processVenueOsmOnly(venue);
   }
 
-  // --- Step 2: Fetch 2GIS reviews via Apify ---
+  // Fetch 2GIS reviews via Apify
   const twoGisReviews = await fetch2GisReviews(
     venue.twoGisUrl,
     apifyToken,
@@ -206,19 +287,11 @@ async function processVenue(
   );
 
   if (twoGisReviews.length === 0) {
-    await prisma.venue.update({
-      where: { id: venue.id },
-      data: { updatedAt: new Date() },
-    });
-    return {
-      venueId: venue.id,
-      name: venue.name,
-      newReviews: 0,
-      vibeScore: null,
-    };
+    // No reviews from Apify — fall back to OSM-only
+    return processVenueOsmOnly(venue);
   }
 
-  // --- Step 3: Filter out already-stored reviews ---
+  // Filter out already-stored reviews
   const existingReviews = await prisma.review.findMany({
     where: { venueId: venue.id, source: "2gis" },
     select: { authorName: true, text: true },
@@ -237,7 +310,7 @@ async function processVenue(
       !existingKeys.has(`${r.author}::${r.text.slice(0, 50)}`),
   );
 
-  // --- Step 4: Analyze with Gemini ---
+  // Analyze with Gemini
   const allReviewsForAnalysis: ReviewForAnalysis[] =
     twoGisReviews.map((r) => ({
       text: r.text || `Оценка: ${r.rating}/5`,
@@ -245,7 +318,6 @@ async function processVenue(
       source: "2gis",
     }));
 
-  // Run analysis on all reviews (not just new) for full picture
   const analysis = await AIAnalyzerService.analyzeReviewsBatch(
     venue.name,
     venue.category.name,
@@ -262,7 +334,7 @@ async function processVenue(
     );
   }
 
-  // --- Step 5: Store new reviews ---
+  // Store new reviews
   for (let i = 0; i < newReviews.length; i++) {
     const review = newReviews[i];
     const sentiment =
@@ -281,7 +353,7 @@ async function processVenue(
     });
   }
 
-  // --- Step 6: Create social signal record ---
+  // Create social signal record
   const avgSentiment =
     sentiments.length > 0
       ? sentiments.reduce((a, b) => a + b, 0) / sentiments.length
@@ -296,11 +368,11 @@ async function processVenue(
     },
   });
 
-  // --- Step 7: Recalculate Live Score ---
+  // Recalculate Live Score
   const newScore =
     await SocialSignalService.calculateLiveScore(venue.id);
 
-  // --- Step 8: Update venue with new score + AI analysis ---
+  // Update venue with new score + AI analysis
   const aiDescription = [
     analysis.summary,
     analysis.strongPoints.length > 0
@@ -328,7 +400,7 @@ async function processVenue(
   });
 
   logger.info(
-    `sync-pulse: "${venue.name}" — ${newReviews.length} new 2GIS reviews, ` +
+    `sync-pulse [apify]: "${venue.name}" — ${newReviews.length} new 2GIS reviews, ` +
       `vibe ${analysis.vibeScore}, score ${venue.liveScore}→${newScore}`,
     { endpoint: "/api/cron/sync-pulse" },
   );
@@ -389,9 +461,9 @@ async function fetch2GisReviews(
     // Poll for completion (max 2 min, check every 10s)
     const maxWait = 120_000;
     const pollInterval = 10_000;
-    const startTime = Date.now();
+    const pollStart = Date.now();
 
-    while (Date.now() - startTime < maxWait) {
+    while (Date.now() - pollStart < maxWait) {
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
 
       const statusRes = await fetch(

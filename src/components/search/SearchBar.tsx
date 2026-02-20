@@ -34,11 +34,13 @@ export function SearchBar({ onSearch, isLoading }: SearchBarProps) {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Что ищете? Например: тихое кафе с Wi-Fi..."
+            aria-label="Поиск заведений"
             className="w-full rounded-xl border border-zinc-700 bg-zinc-900/95 px-4 py-3 pr-12 text-sm text-white placeholder-zinc-500 shadow-xl backdrop-blur focus:border-emerald-500 focus:outline-none"
           />
           <button
             type="submit"
             disabled={isLoading || !query.trim()}
+            aria-label="Искать с помощью AI"
             className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-500 disabled:opacity-40"
           >
             {isLoading ? "..." : "AI"}

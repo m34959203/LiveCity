@@ -1,6 +1,21 @@
+import { z } from "zod";
 import { geminiModel } from "@/lib/gemini";
 import { VenueService } from "./venue.service";
 import { logger } from "@/lib/logger";
+
+const dayPlanResponseSchema = z.object({
+  title: z.string().default("Ваш план на день"),
+  description: z.string().default(""),
+  steps: z.array(z.object({
+    time: z.string(),
+    venueId: z.string(),
+    duration: z.string(),
+    reason: z.string(),
+    tips: z.string().default(""),
+  })).default([]),
+  totalDuration: z.string().default(""),
+  estimatedBudget: z.string().default(""),
+});
 
 export interface PlannerRequest {
   query: string;
@@ -109,44 +124,36 @@ ${JSON.stringify(venueContext)}
         .replace(/```json?\s*/g, "")
         .replace(/```/g, "")
         .trim();
-      const parsed = JSON.parse(cleaned);
+      const parsed = dayPlanResponseSchema.parse(JSON.parse(cleaned));
 
       // Enrich steps with full venue data
       const venueMap = new Map(venues.map((v) => [v.id, v]));
-      const steps: PlanStep[] = (parsed.steps || [])
-        .map(
-          (s: {
-            venueId: string;
-            time: string;
-            duration: string;
-            reason: string;
-            tips: string;
-          }) => {
-            const venue = venueMap.get(s.venueId);
-            if (!venue) return null;
-            return {
-              time: s.time,
-              venue: {
-                id: venue.id,
-                name: venue.name,
-                category: venue.category.name,
-                liveScore: venue.liveScore,
-                address: venue.address,
-              },
-              duration: s.duration,
-              reason: s.reason,
-              tips: s.tips || "",
-            };
-          },
-        )
-        .filter(Boolean) as PlanStep[];
+      const steps: PlanStep[] = parsed.steps
+        .map((s) => {
+          const v = venueMap.get(s.venueId);
+          if (!v) return null;
+          return {
+            time: s.time,
+            venue: {
+              id: v.id,
+              name: v.name,
+              category: v.category.name,
+              liveScore: v.liveScore,
+              address: v.address,
+            },
+            duration: s.duration,
+            reason: s.reason,
+            tips: s.tips,
+          };
+        })
+        .filter((step): step is PlanStep => step !== null);
 
       return {
-        title: parsed.title || "Ваш план на день",
-        description: parsed.description || "",
+        title: parsed.title,
+        description: parsed.description,
         steps,
-        totalDuration: parsed.totalDuration || "",
-        estimatedBudget: parsed.estimatedBudget || "",
+        totalDuration: parsed.totalDuration,
+        estimatedBudget: parsed.estimatedBudget,
       };
     } catch (error) {
       logger.error("PlannerService AI failed", {

@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { geminiModel } from "@/lib/gemini";
 import { SocialSignalService } from "./social-signal.service";
 import type { VenueListItem } from "@/types/venue";
@@ -14,6 +15,30 @@ interface AIActionPlan {
   expectedImpact: string;
   difficulty: "low" | "medium" | "high";
 }
+
+// Zod schemas for AI response validation
+const searchResponseSchema = z.object({
+  interpretation: z.string().default(""),
+  results: z.array(z.object({
+    venueId: z.string(),
+    relevance: z.number(),
+    reason: z.string().default(""),
+  })).default([]),
+});
+
+const actionPlanSchema = z.array(z.object({
+  priority: z.number(),
+  action: z.string(),
+  expectedImpact: z.string(),
+  difficulty: z.enum(["low", "medium", "high"]),
+}));
+
+const complaintSchema = z.array(z.object({
+  topic: z.string(),
+  percentage: z.number(),
+  reviewCount: z.number(),
+  trend: z.enum(["rising", "stable", "declining"]),
+}));
 
 export class AIService {
   /**
@@ -83,14 +108,14 @@ ${JSON.stringify(venueContext)}
 
       // Strip markdown code blocks if present
       const cleaned = text.replace(/```json?\s*/g, "").replace(/```/g, "").trim();
-      const parsed = JSON.parse(cleaned);
+      const parsed = searchResponseSchema.parse(JSON.parse(cleaned));
 
       return {
-        interpretation: parsed.interpretation || "",
-        results: (parsed.results || []).map((r: AISearchResult) => ({
+        interpretation: parsed.interpretation,
+        results: parsed.results.map((r) => ({
           venueId: r.venueId,
           relevance: Math.min(1, Math.max(0, r.relevance || 0)),
-          reason: r.reason || "",
+          reason: r.reason,
         })),
       };
     } catch (error) {
@@ -124,7 +149,7 @@ ${complaints.map((c, i) => `${i + 1}. ${c}`).join("\n")}
       const result = await geminiModel.generateContent(prompt);
       const text = result.response.text().trim();
       const cleaned = text.replace(/```json?\s*/g, "").replace(/```/g, "").trim();
-      return JSON.parse(cleaned);
+      return actionPlanSchema.parse(JSON.parse(cleaned));
     } catch (error) {
       console.error("AIService.generateActionPlan error:", error);
       return [
@@ -176,7 +201,7 @@ ${negativeReviews.map((r, i) => `${i + 1}. "${r}"`).join("\n")}
       const result = await geminiModel.generateContent(prompt);
       const text = result.response.text().trim();
       const cleaned = text.replace(/```json?\s*/g, "").replace(/```/g, "").trim();
-      return JSON.parse(cleaned);
+      return complaintSchema.parse(JSON.parse(cleaned));
     } catch {
       return [
         { topic: "Долгое ожидание", percentage: 40, reviewCount: negativeReviews.length, trend: "stable" as const },

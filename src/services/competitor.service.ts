@@ -1,6 +1,14 @@
+import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { geminiModel } from "@/lib/gemini";
 import { logger } from "@/lib/logger";
+
+const competitorInsightSchema = z.object({
+  strengths: z.array(z.string()).default([]),
+  weaknesses: z.array(z.string()).default([]),
+  opportunities: z.array(z.string()).default([]),
+  summary: z.string().default(""),
+});
 
 interface CompetitorVenue {
   id: string;
@@ -149,14 +157,14 @@ ${competitorReviews.map((r) => `- [${r.venue.name}] "${r.text}"`).join("\n")}
         .replace(/```json?\s*/g, "")
         .replace(/```/g, "")
         .trim();
-      const parsed = JSON.parse(cleaned);
+      const parsed = competitorInsightSchema.parse(JSON.parse(cleaned));
 
       return {
         competitors,
-        strengths: parsed.strengths || [],
-        weaknesses: parsed.weaknesses || [],
-        opportunities: parsed.opportunities || [],
-        summary: parsed.summary || "",
+        strengths: parsed.strengths,
+        weaknesses: parsed.weaknesses,
+        opportunities: parsed.opportunities,
+        summary: parsed.summary,
       };
     } catch (error) {
       logger.error("CompetitorService AI failed", {

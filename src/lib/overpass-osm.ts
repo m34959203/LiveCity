@@ -176,20 +176,21 @@ function parseElements(elements: Record<string, unknown>[]): OsmVenue[] {
         | { lat?: number; lon?: number }
         | undefined;
 
+      const latitude = Number(el.lat) || center?.lat;
+      const longitude = Number(el.lon) || center?.lon;
+
       return {
         name: tags.name,
         address: buildAddress(tags),
-        latitude:
-          (el.lat as number) ?? center?.lat ?? 0,
-        longitude:
-          (el.lon as number) ?? center?.lon ?? 0,
+        latitude: latitude ?? NaN,
+        longitude: longitude ?? NaN,
         categorySlug: resolveCategory(tags),
         phone: tags.phone || tags["contact:phone"] || undefined,
         website: tags.website || tags["contact:website"] || undefined,
         osmId: `${el.type}/${el.id}`,
       };
     })
-    .filter((v) => v.latitude !== 0 && v.longitude !== 0);
+    .filter((v) => Number.isFinite(v.latitude) && Number.isFinite(v.longitude));
 }
 
 function resolveCategory(tags: Record<string, string>): string {
