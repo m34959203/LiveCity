@@ -19,7 +19,7 @@ export function SearchResults({
   onClose,
 }: SearchResultsProps) {
   return (
-    <div className="absolute left-3 right-3 top-28 z-20 max-h-[55vh] overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-950/95 p-3 shadow-2xl backdrop-blur sm:left-44 sm:right-auto sm:top-28 sm:w-80">
+    <div className="absolute left-3 right-3 top-14 z-20 max-h-[55vh] overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-950/95 p-3 shadow-2xl backdrop-blur sm:left-3 sm:right-auto sm:top-14 sm:w-80">
       <div className="mb-2 flex items-center justify-between">
         <span className="text-xs font-medium text-emerald-400">
           AI-результаты

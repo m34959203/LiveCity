@@ -3,7 +3,6 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import dynamic from "next/dynamic";
 import { Header } from "@/components/layout/Header";
-import { SearchBar } from "@/components/search/SearchBar";
 import { SearchResults } from "@/components/search/SearchResults";
 import { VenueDetails } from "@/components/venue/VenueDetails";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
@@ -158,10 +157,12 @@ export default function Home() {
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-zinc-950">
-      <Header city={city} onCityChange={() => setCity(null)} />
-
-      {/* Search */}
-      <SearchBar onSearch={handleSearch} isLoading={searchLoading} />
+      <Header
+        city={city}
+        onCityChange={() => setCity(null)}
+        onSearch={handleSearch}
+        isSearchLoading={searchLoading}
+      />
 
       {/* Category Filter */}
       <CategoryFilter
