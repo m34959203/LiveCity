@@ -24,3 +24,17 @@ export const DEFAULT_CITY_ID = "almaty";
 export function getCityById(id: string): CityConfig | undefined {
   return CITIES.find((c) => c.id === id);
 }
+
+/** Find the closest city to given coordinates. */
+export function getClosestCity(lat: number, lng: number): CityConfig {
+  let best = CITIES[0];
+  let bestDist = Infinity;
+  for (const city of CITIES) {
+    const d = (city.lat - lat) ** 2 + (city.lng - lng) ** 2;
+    if (d < bestDist) {
+      bestDist = d;
+      best = city;
+    }
+  }
+  return best;
+}
