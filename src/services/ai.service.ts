@@ -128,7 +128,7 @@ ${JSON.stringify(venueContext)}
     } catch (error) {
       console.error("AIService.semanticSearch error:", error);
       // Fallback: simple text matching
-      return this.fallbackSearch(query, venues);
+      return this.keywordSearch(query, venues);
     }
   }
 
@@ -228,13 +228,15 @@ ${negativeReviews.map((r, i) => `${i + 1}. "${r}"`).join("\n")}
     [/кино|фильм|боулинг|развлеч|игр/i, ["entertainment"]],
     [/шоппинг|магазин|торгов|молл|трц/i, ["mall"]],
     [/поесть|голод|еда|кухн|вкусн|шашлык|мясо/i, ["restaurant", "cafe"]],
+    [/музей|галере|выставк|достоприм|памятник|театр|культур|экскурс/i, ["entertainment", "park"]],
+    [/отдохн|досуг|весел|куда пойти|куда сходить|чем занять/i, ["entertainment", "restaurant", "bar", "park"]],
   ];
 
   /**
-   * Fallback search when Gemini is unavailable.
-   * Uses keyword-to-category mapping for fuzzy matching.
+   * Keyword search — used as fallback when Gemini returns empty or fails.
+   * Maps Russian keywords to venue categories for fuzzy matching.
    */
-  private static fallbackSearch(
+  static keywordSearch(
     query: string,
     venues: VenueListItem[],
   ): { results: AISearchResult[]; interpretation: string } {

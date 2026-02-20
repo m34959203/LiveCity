@@ -82,7 +82,7 @@ export async function POST(request: NextRequest) {
 
     // Enrich results with full venue data
     const venueMap = new Map(venues.map((v) => [v.id, v]));
-    const enrichedResults = aiResult.results
+    let enrichedResults = aiResult.results
       .slice(0, limit)
       .map((r) => {
         const venue = venueMap.get(r.venueId);
@@ -95,8 +95,35 @@ export async function POST(request: NextRequest) {
       })
       .filter(Boolean);
 
+    // --- Fallback: keyword search if AI returned nothing ---
+    if (enrichedResults.length === 0 && venues.length > 0) {
+      logger.info(
+        `AI returned empty for "${query}", trying keyword fallback`,
+        { endpoint: "/api/search" },
+      );
+      const fallback = AIService.keywordSearch(query.trim(), venues);
+      enrichedResults = fallback.results
+        .slice(0, limit)
+        .map((r) => {
+          const venue = venueMap.get(r.venueId);
+          if (!venue) return null;
+          return { venue, relevance: r.relevance, reason: r.reason };
+        })
+        .filter(Boolean);
+
+      if (enrichedResults.length > 0) {
+        return NextResponse.json({
+          data: {
+            results: enrichedResults,
+            interpretation: fallback.interpretation || aiResult.interpretation,
+            totalFound: enrichedResults.length,
+          },
+        });
+      }
+    }
+
     // --- Lazy Discovery via OpenStreetMap ---
-    // If AI search found nothing relevant, try discovering via Overpass
+    // If keyword search also found nothing, try discovering via Overpass
     if (enrichedResults.length === 0 && cityConfig) {
       logger.info(
         `Lazy Discovery: no DB results for "${query}", searching OSM`,

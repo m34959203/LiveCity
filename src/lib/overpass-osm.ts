@@ -36,6 +36,10 @@ const OSM_TAG_TO_CATEGORY: [string, string, string][] = [
   ["amenity", "nightclub", "entertainment"],
   ["amenity", "theatre", "entertainment"],
   ["leisure", "bowling_alley", "entertainment"],
+  ["tourism", "museum", "entertainment"],
+  ["tourism", "gallery", "entertainment"],
+  ["tourism", "attraction", "entertainment"],
+  ["historic", "monument", "entertainment"],
 ];
 
 // Russian search keywords → Overpass tag filters
@@ -53,6 +57,9 @@ const QUERY_TO_OSM: [RegExp, string[]][] = [
   [/wifi|работ/i, ['["amenity"~"^(cafe|restaurant)$"]']],
   [/ребёнк|ребенк|дет/i, ['["leisure"="park"]', '["amenity"="cafe"]']],
   [/музык|танц|вечер/i, ['["amenity"~"^(bar|pub|nightclub)$"]']],
+  [/музей|галере|выставк|экспозиц/i, ['["tourism"~"^(museum|gallery)$"]']],
+  [/достоприм|памятник|монумент|истори/i, ['["historic"~"^(monument|memorial|castle|ruins)$"]', '["tourism"="attraction"]']],
+  [/театр|спектакл|пьес/i, ['["amenity"="theatre"]']],
 ];
 
 const PRIMARY_ENDPOINT = "https://overpass-api.de/api/interpreter";
@@ -83,6 +90,8 @@ export class OverpassClient {
   nwr["amenity"~"^(restaurant|cafe|fast_food|bar|pub|cinema|nightclub|theatre)$"]["name"](${bbox});
   nwr["leisure"~"^(park|bowling_alley)$"]["name"](${bbox});
   nwr["shop"="mall"]["name"](${bbox});
+  nwr["tourism"~"^(museum|gallery|attraction)$"]["name"](${bbox});
+  nwr["historic"~"^(monument|memorial)$"]["name"](${bbox});
 );
 out center qt;
 `;
