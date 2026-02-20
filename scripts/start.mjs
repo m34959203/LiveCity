@@ -40,6 +40,29 @@ try {
       console.log("  - Lazy Discovery (user searches)");
     }
 
+    // Bulk-fix: assign category-based scores to any venues stuck at 0
+    const unscoredCount = await prisma.venue.count({
+      where: { liveScore: { lt: 0.1 }, isActive: true },
+    });
+    if (unscoredCount > 0) {
+      console.log(`[startup] ${unscoredCount} venues with score=0 — applying category baselines...`);
+      const baselines = {
+        restaurant: 5.5, cafe: 5.0, bar: 4.5,
+        park: 6.0, mall: 5.5, entertainment: 5.0,
+      };
+      const categories = await prisma.category.findMany({ select: { id: true, slug: true } });
+      let updated = 0;
+      for (const cat of categories) {
+        const score = baselines[cat.slug] ?? 4.5;
+        const result = await prisma.venue.updateMany({
+          where: { categoryId: cat.id, liveScore: { lt: 0.1 }, isActive: true },
+          data: { liveScore: score },
+        });
+        updated += result.count;
+      }
+      console.log(`[startup] Updated ${updated} venues with initial scores`);
+    }
+
     await prisma.$disconnect();
   }
 } catch (e) {
